@@ -159,7 +159,7 @@ const {
 } = useNoteTone();
 
 // ── Auth ──
-const API_URL = "http://localhost:5000";
+const API_URL = "http://10.0.0.89:5000";
 const user = ref(null);
 const token = ref(localStorage.getItem("lp_token") || "");
 const showAuth = ref(null);
