@@ -117,7 +117,7 @@
           <div v-if="active.type === 'lyrics' && parsedLines.length" class="lines-container" ref="linesContainer">
             <div v-for="(line, idx) in parsedLines" :key="idx"
               class="lyric-line-wrap"
-              :class="{ singing: isSinging && currentLineIdx === idx, past: isSinging && idx < currentLineIdx }"
+              :class="{ singing: isSinging && displayLineIdx === idx, past: isSinging && idx < displayLineIdx }"
               @click="handleLineClick(idx)">
               <div class="lyric-line">
                 <span class="line-num">{{ idx + 1 }}</span>
@@ -127,7 +127,7 @@
                 <span v-if="line.direction" class="line-dir">{{ line.direction }}</span>
               </div>
               <!-- Hold bar -->
-              <div v-if="isSinging && currentLineIdx === idx" class="hold-bar"
+              <div v-if="isSinging && displayLineIdx === idx" class="hold-bar"
                 :style="{ animationDuration: getLineDuration(line.text) + 's' }"></div>
             </div>
           </div>
@@ -304,16 +304,17 @@ const importFromAccount = async () => {
   try {
     let page = 1;
     let added = 0;
+    let skipped = 0;
+    const existingIds = new Set(playlist.value.map(p => p.generationId).filter(Boolean));
     while (true) {
       const res = await fetch(API_URL + "/api/ai/history?page=" + page, {
         headers: { Authorization: "Bearer " + token.value }
       });
       if (!res.ok) throw new Error("Failed to load history");
       const data = await res.json();
-      const existingIds = new Set(playlist.value.map(p => p.generationId).filter(Boolean));
       for (const g of data.generations) {
         if (g.tool !== "lyrics" && g.tool !== "poetry") continue;
-        if (existingIds.has(g._id)) continue;
+        if (existingIds.has(g._id)) { skipped++; continue; }
         const m = g.metadata || {};
         const item = {
           type: g.tool,
@@ -337,12 +338,15 @@ const importFromAccount = async () => {
           item.devices = m.devices || [];
         }
         playlist.value.push(item);
+        existingIds.add(g._id);
         added++;
       }
       if (page >= data.pages) break;
       page++;
     }
-    if (added === 0) importError.value = "No lyrics or poetry found in your history";
+    if (added === 0) {
+      importError.value = skipped > 0 ? `All ${skipped} songs already imported` : "No lyrics or poetry found in your history";
+    }
   } catch (e) {
     importError.value = e.message;
   } finally {
@@ -354,14 +358,22 @@ const importFromAccount = async () => {
 const parsedLines = computed(() => {
   if (!active.value || active.value.type === "poetry") return [];
   const annotations = active.value.lineAnnotations || [];
+  const map = new Map();
+  for (const a of annotations) {
+    if (a.line) map.set(a.line.trim().toLowerCase(), a);
+  }
   const lyricsText = active.value.lyrics || active.value.poem || "";
   const rawLines = lyricsText.split("\n");
-  return rawLines.map((text, i) => ({
-    text,
-    note: annotations[i]?.note || "",
-    chord: annotations[i]?.chord || "",
-    direction: annotations[i]?.direction || ""
-  }));
+  return rawLines.map((raw) => {
+    const text = raw.trim();
+    const a = map.get(text.toLowerCase()) || null;
+    return {
+      text: raw,
+      note: a?.note || "",
+      chord: a?.chord || "",
+      direction: a?.direction || ""
+    };
+  });
 });
 
 const poemLines = computed(() => {
@@ -378,17 +390,39 @@ const tpNote = (n) => n ? transposeNote(n, transposeSemitones.value) : "";
 const tpChord = (c) => c ? transposeChord(c, transposeSemitones.value) : "";
 
 // ── Singing ──
+// Build singable lines (lines with notes) and a map from sing index → display index
+const singableLines = computed(() => {
+  const lines = [];
+  const indexMap = [];
+  parsedLines.value.forEach((line, i) => {
+    if (line.note) {
+      lines.push(line);
+      indexMap.push(i);
+    }
+  });
+  return { lines, indexMap };
+});
+
 const startSinging = () => {
-  if (!parsedLines.value.length) return;
-  singAllLines(parsedLines.value, active.value.key || "C4");
+  if (!singableLines.value.lines.length) return;
+  singAllLines(singableLines.value.lines);
 };
 
 const handleLineClick = (idx) => {
-  if (isSinging.value) jumpToLine(idx);
+  if (!isSinging.value) return;
+  // Map display index to sing index
+  const singIdx = singableLines.value.indexMap.indexOf(idx);
+  if (singIdx >= 0) jumpToLine(singIdx);
 };
 
+// Map current sing index back to display index for highlighting + scrolling
+const displayLineIdx = computed(() => {
+  if (currentLineIdx.value < 0) return -1;
+  return singableLines.value.indexMap[currentLineIdx.value] ?? -1;
+});
+
 // Auto-scroll during singing
-watch(currentLineIdx, async (idx) => {
+watch(displayLineIdx, async (idx) => {
   if (idx < 0 || !linesContainer.value) return;
   await nextTick();
   const el = linesContainer.value.children[idx];
