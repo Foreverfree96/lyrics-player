@@ -173,8 +173,9 @@ const {
 } = useNoteTone();
 
 // ── Auth ──
-// Use localhost on PC, tunnel on mobile/Capacitor
-const isLocal = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)/.test(window.location.hostname);
+// Use tunnel on Capacitor (native app), localhost only on actual PC browser
+const isCapacitor = typeof window !== "undefined" && window.location.protocol === "https:" && window.location.hostname === "localhost";
+const isLocal = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)/.test(window.location.hostname) && !isCapacitor;
 const API_URL = isLocal ? "http://localhost:5000" : "https://lyrics-api.procreatorhub.com";
 const user = ref(null);
 const token = ref(localStorage.getItem("lp_token") || "");
