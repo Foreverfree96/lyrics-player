@@ -159,6 +159,22 @@
         </div>
       </main>
     </div>
+
+    <!-- Fixed bottom player bar -->
+    <div v-if="isSinging" class="player-bar">
+      <div class="pb-progress" :style="{ width: singProgress + '%' }"></div>
+      <div class="pb-inner">
+        <div class="pb-info">
+          <span class="pb-title">{{ active?.title || 'Untitled' }}</span>
+          <span class="pb-line">{{ currentSingLine }}</span>
+        </div>
+        <div class="pb-controls">
+          <button v-if="!isPaused" class="pb-btn" @click="pauseSinging">| |</button>
+          <button v-else class="pb-btn accent" @click="resumeSinging">&#9654;</button>
+          <button class="pb-btn danger" @click="stopSinging">&#9632;</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -415,6 +431,16 @@ const handleLineClick = (idx) => {
   if (singIdx >= 0) jumpToLine(singIdx);
 };
 
+// Player bar info
+const singProgress = computed(() => {
+  if (currentLineIdx.value < 0 || !singableLines.value.lines.length) return 0;
+  return ((currentLineIdx.value + 1) / singableLines.value.lines.length) * 100;
+});
+const currentSingLine = computed(() => {
+  if (currentLineIdx.value < 0) return "";
+  return singableLines.value.lines[currentLineIdx.value]?.text || "";
+});
+
 // Map current sing index back to display index for highlighting + scrolling
 const displayLineIdx = computed(() => {
   if (currentLineIdx.value < 0) return -1;
@@ -651,11 +677,49 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
 .device-example { font-style: italic; font-size: 0.88rem; color: #e5e5e5; font-family: Georgia, serif; }
 .device-explain { font-size: 0.8rem; color: #888; }
 
+/* Fixed bottom player bar */
+.player-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+  background: #1a1a1a; border-top: 1px solid #333;
+}
+.pb-progress {
+  position: absolute; top: 0; left: 0; height: 3px;
+  background: #6b21a8; transition: width 0.3s ease;
+}
+.pb-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; gap: 12px;
+}
+.pb-info { flex: 1; min-width: 0; }
+.pb-title {
+  display: block; font-size: 0.7rem; color: #888;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pb-line {
+  display: block; font-size: 0.85rem; color: #e5e5e5;
+  font-family: Georgia, serif; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.pb-controls { display: flex; gap: 8px; flex-shrink: 0; }
+.pb-btn {
+  width: 40px; height: 40px; border-radius: 50%; border: 2px solid #333;
+  background: #222; color: #ccc; font-size: 1rem; font-weight: 900;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.pb-btn:hover { background: #333; }
+.pb-btn.accent { background: #6b21a8; border-color: #6b21a8; color: #fff; }
+.pb-btn.accent:hover { background: #7c3aed; }
+.pb-btn.danger { border-color: #dc2626; color: #ef4444; }
+.pb-btn.danger:hover { background: #dc2626; color: #fff; }
+
+/* Add bottom padding when bar is visible so content isn't hidden behind it */
+.lines-container { padding-bottom: 70px; }
+
 /* Mobile */
 @media (max-width: 700px) {
   .player-layout { flex-direction: column; }
   .sidebar { width: 100%; min-width: unset; max-height: 180px; border-right: none; border-bottom: 1px solid #222; }
-  .content { padding: 16px; }
+  .content { padding: 16px; padding-bottom: 80px; }
   .meta-row { gap: 6px; }
 }
 </style>
