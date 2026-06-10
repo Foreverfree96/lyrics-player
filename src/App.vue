@@ -173,7 +173,9 @@ const {
 } = useNoteTone();
 
 // ── Auth ──
-const API_URL = "https://bradford-uniprotkb-cross-june.trycloudflare.com";
+// Use localhost on PC, tunnel on mobile/Capacitor
+const isLocal = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)/.test(window.location.hostname);
+const API_URL = isLocal ? "http://localhost:5000" : "https://bradford-uniprotkb-cross-june.trycloudflare.com";
 const user = ref(null);
 const token = ref(localStorage.getItem("lp_token") || "");
 const showAuth = ref(null);
