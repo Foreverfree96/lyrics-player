@@ -91,6 +91,17 @@ function getContext() {
   return audioCtx;
 }
 
+// Call from a user gesture to ensure AudioContext is unlocked on mobile
+function warmUp() {
+  const ctx = getContext();
+  // Play a silent buffer to unlock audio on Android/iOS
+  const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination);
+  src.start();
+}
+
 function getDest() {
   getContext();
   return masterVolume;
@@ -128,6 +139,7 @@ export function useNoteTone() {
 
   // ── Simple piano tone (click a note badge) ──────────────────────────────
   const playNote = (note, duration = 0.8) => {
+    warmUp();
     const freq = getFrequency(note);
     if (!freq) return;
 
@@ -300,6 +312,9 @@ export function useNoteTone() {
   // lines: array of { text, note }
   // onLineStart(idx): callback to highlight the current line
   const singAllLines = async (lines, onLineStart) => {
+    // Unlock audio on mobile — must happen synchronously inside user gesture
+    warmUp();
+
     if (isSinging.value && !isPaused.value) {
       stopSinging();
       return;
