@@ -4,7 +4,7 @@
     <header class="top-bar">
       <h1 class="logo">Lyrics Player</h1>
       <div v-if="user" class="user-info">
-        <span class="username">{{ user.name }}</span>
+        <span class="username">{{ user.username }}</span>
         <button class="btn-sm" @click="logout">Log out</button>
       </div>
       <div v-else class="auth-btns">
@@ -18,7 +18,7 @@
       <div class="modal">
         <h2>{{ showAuth === 'login' ? 'Log In' : 'Sign Up' }}</h2>
         <form @submit.prevent="handleAuth">
-          <input v-if="showAuth === 'signup'" v-model="authForm.name" placeholder="Display name" required class="input" />
+          <input v-if="showAuth === 'signup'" v-model="authForm.username" placeholder="Username" required class="input" />
           <input v-model="authForm.email" type="email" placeholder="Email" required class="input" />
           <input v-model="authForm.password" type="password" placeholder="Password" required class="input" />
           <p v-if="authError" class="error">{{ authError }}</p>
@@ -179,7 +179,7 @@ const API_URL = isLocal ? "http://localhost:5000" : "https://lyrics-api.procreat
 const user = ref(null);
 const token = ref(localStorage.getItem("lp_token") || "");
 const showAuth = ref(null);
-const authForm = ref({ name: "", email: "", password: "" });
+const authForm = ref({ username: "", email: "", password: "" });
 const authError = ref("");
 const authLoading = ref(false);
 
@@ -205,7 +205,7 @@ const handleAuth = async () => {
   const endpoint = showAuth.value === "login" ? "/login" : "/signup";
   const body = showAuth.value === "login"
     ? { email: authForm.value.email, password: authForm.value.password }
-    : { name: authForm.value.name, email: authForm.value.email, password: authForm.value.password };
+    : { username: authForm.value.username, email: authForm.value.email, password: authForm.value.password };
   try {
     const res = await fetch(API_URL + "/api/users" + endpoint, {
       method: "POST",
@@ -218,7 +218,7 @@ const handleAuth = async () => {
     localStorage.setItem("lp_token", data.token);
     user.value = data;
     showAuth.value = null;
-    authForm.value = { name: "", email: "", password: "" };
+    authForm.value = { username: "", email: "", password: "" };
   } catch (e) {
     authError.value = e.message;
   } finally {
