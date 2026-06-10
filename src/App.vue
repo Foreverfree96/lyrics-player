@@ -39,10 +39,17 @@
         <div class="upload-icon">+</div>
         <p class="upload-title">Import Lyrics / Poetry</p>
         <p class="upload-sub">Load .json files exported from AI Studio</p>
-        <label class="import-btn">
-          Browse Files
-          <input type="file" accept=".json,application/json" multiple @change="handleFileInput" hidden />
-        </label>
+        <div class="import-actions">
+          <label class="import-btn">
+            Browse Files
+            <input type="file" accept=".json,application/json" multiple @change="handleFileInput" hidden />
+          </label>
+          <button v-if="user" class="import-btn account-btn" @click="importFromAccount" :disabled="importingAccount">
+            {{ importingAccount ? 'Loading...' : 'Import from Account' }}
+          </button>
+        </div>
+        <p v-if="!user" class="upload-hint">Log in to import your AI Studio history</p>
+        <p v-if="importError" class="error" style="margin-top:8px">{{ importError }}</p>
         <input type="file" accept=".json,application/json" multiple @change="handleFileInput" class="file-input" />
       </div>
     </div>
@@ -53,10 +60,13 @@
       <aside class="sidebar">
         <div class="sidebar-header">
           <h3>Playlist</h3>
-          <label class="add-more-btn">
+          <label class="add-more-btn" title="Browse files">
             +
             <input type="file" accept=".json,application/json" multiple @change="handleFileInput" hidden />
           </label>
+          <button v-if="user" class="add-more-btn account-import" @click="importFromAccount" :disabled="importingAccount" title="Import from account">
+            {{ importingAccount ? '...' : 'DL' }}
+          </button>
         </div>
         <div v-for="(item, i) in playlist" :key="i" class="pl-item" :class="{ active: activeIdx === i }" @click="setActive(i)">
           <span class="pl-title">{{ item.title || 'Untitled' }}</span>
@@ -274,6 +284,47 @@ const loadFiles = async (files) => {
 const handleDrop = (e) => { loadFiles(e.dataTransfer.files); };
 const handleFileInput = (e) => { loadFiles(e.target.files); e.target.value = ""; };
 
+// ── Import from account ──
+const importingAccount = ref(false);
+const importError = ref("");
+
+const importFromAccount = async () => {
+  if (!token.value) return;
+  importingAccount.value = true;
+  importError.value = "";
+  try {
+    let page = 1;
+    let added = 0;
+    while (true) {
+      const res = await fetch(API_URL + "/api/ai/history?page=" + page, {
+        headers: { Authorization: "Bearer " + token.value }
+      });
+      if (!res.ok) throw new Error("Failed to load history");
+      const data = await res.json();
+      for (const g of data.generations) {
+        if (g.tool !== "lyrics" && g.tool !== "poetry") continue;
+        try {
+          const parsed = JSON.parse(g.result);
+          parsed.type = parsed.type || g.tool;
+          parsed.generationId = g._id;
+          if (g.metadata?.lineAnnotations) parsed.lineAnnotations = g.metadata.lineAnnotations;
+          if (g.metadata?.key) parsed.key = parsed.key || g.metadata.key;
+          if (g.metadata?.bpm) parsed.bpm = parsed.bpm || g.metadata.bpm;
+          playlist.value.push(parsed);
+          added++;
+        } catch { /* skip unparseable */ }
+      }
+      if (page >= data.pages) break;
+      page++;
+    }
+    if (added === 0) importError.value = "No lyrics or poetry found in your history";
+  } catch (e) {
+    importError.value = e.message;
+  } finally {
+    importingAccount.value = false;
+  }
+};
+
 // ── Lyrics parsing ──
 const parsedLines = computed(() => {
   if (!active.value || active.value.type === "poetry") return [];
@@ -389,13 +440,19 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
 .upload-icon { font-size: 3rem; color: #6b21a8; margin-bottom: 12px; }
 .upload-title { font-size: 1.1rem; font-weight: 700; color: #e5e5e5; }
 .upload-sub { font-size: 0.85rem; color: #666; margin-top: 4px; }
+.import-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; justify-content: center; position: relative; z-index: 2; }
 .import-btn {
-  display: inline-block; margin-top: 16px; padding: 12px 32px;
+  display: inline-block; padding: 12px 28px;
   background: #6b21a8; color: #fff; border-radius: 10px;
-  font-weight: 700; font-size: 1rem; cursor: pointer;
-  position: relative; z-index: 2; transition: background 0.15s;
+  font-weight: 700; font-size: 0.95rem; cursor: pointer;
+  border: none; transition: background 0.15s;
 }
 .import-btn:hover { background: #7c3aed; }
+.import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.account-btn { background: #1a1a1a; border: 2px solid #6b21a8; color: #c4b5fd; }
+.account-btn:hover { background: #6b21a8; color: #fff; }
+.upload-hint { font-size: 0.78rem; color: #555; margin-top: 10px; }
+.account-import { font-size: 0.65rem; font-weight: 800; }
 .file-input {
   position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
 }
