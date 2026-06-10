@@ -233,9 +233,15 @@ const logout = () => {
   localStorage.removeItem("lp_token");
 };
 
-// ── Playlist ──
-const playlist = ref([]);
+// ── Playlist (persisted to localStorage) ──
+const loadSaved = () => {
+  try { return JSON.parse(localStorage.getItem("lp_playlist")) || []; } catch { return []; }
+};
+const playlist = ref(loadSaved());
 const activeIdx = ref(0);
+watch(playlist, (val) => {
+  try { localStorage.setItem("lp_playlist", JSON.stringify(val)); } catch { /* quota */ }
+}, { deep: true });
 const active = computed(() => playlist.value[activeIdx.value] || null);
 const dragOver = ref(false);
 const linesContainer = ref(null);
@@ -304,8 +310,10 @@ const importFromAccount = async () => {
       });
       if (!res.ok) throw new Error("Failed to load history");
       const data = await res.json();
+      const existingIds = new Set(playlist.value.map(p => p.generationId).filter(Boolean));
       for (const g of data.generations) {
         if (g.tool !== "lyrics" && g.tool !== "poetry") continue;
+        if (existingIds.has(g._id)) continue;
         const m = g.metadata || {};
         const item = {
           type: g.tool,
