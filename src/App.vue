@@ -37,9 +37,13 @@
     <div v-if="!playlist.length" class="upload-zone" @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="handleDrop" :class="{ hover: dragOver }">
       <div class="upload-inner">
         <div class="upload-icon">+</div>
-        <p class="upload-title">Drop JSON files here</p>
-        <p class="upload-sub">or click to browse</p>
-        <input type="file" accept=".json" multiple @change="handleFileInput" class="file-input" />
+        <p class="upload-title">Import Lyrics / Poetry</p>
+        <p class="upload-sub">Load .json files exported from AI Studio</p>
+        <label class="import-btn">
+          Browse Files
+          <input type="file" accept=".json,application/json" multiple @change="handleFileInput" hidden />
+        </label>
+        <input type="file" accept=".json,application/json" multiple @change="handleFileInput" class="file-input" />
       </div>
     </div>
 
@@ -51,7 +55,7 @@
           <h3>Playlist</h3>
           <label class="add-more-btn">
             +
-            <input type="file" accept=".json" multiple @change="handleFileInput" hidden />
+            <input type="file" accept=".json,application/json" multiple @change="handleFileInput" hidden />
           </label>
         </div>
         <div v-for="(item, i) in playlist" :key="i" class="pl-item" :class="{ active: activeIdx === i }" @click="setActive(i)">
@@ -385,6 +389,13 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
 .upload-icon { font-size: 3rem; color: #6b21a8; margin-bottom: 12px; }
 .upload-title { font-size: 1.1rem; font-weight: 700; color: #e5e5e5; }
 .upload-sub { font-size: 0.85rem; color: #666; margin-top: 4px; }
+.import-btn {
+  display: inline-block; margin-top: 16px; padding: 12px 32px;
+  background: #6b21a8; color: #fff; border-radius: 10px;
+  font-weight: 700; font-size: 1rem; cursor: pointer;
+  position: relative; z-index: 2; transition: background 0.15s;
+}
+.import-btn:hover { background: #7c3aed; }
 .file-input {
   position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
 }
