@@ -175,7 +175,7 @@ const {
 // ── Auth ──
 // Use localhost on PC, tunnel on mobile/Capacitor
 const isLocal = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)/.test(window.location.hostname);
-const API_URL = isLocal ? "http://localhost:5000" : "https://bradford-uniprotkb-cross-june.trycloudflare.com";
+const API_URL = isLocal ? "http://localhost:5000" : "https://lyrics-api.procreatorhub.com";
 const user = ref(null);
 const token = ref(localStorage.getItem("lp_token") || "");
 const showAuth = ref(null);
@@ -305,16 +305,30 @@ const importFromAccount = async () => {
       const data = await res.json();
       for (const g of data.generations) {
         if (g.tool !== "lyrics" && g.tool !== "poetry") continue;
-        try {
-          const parsed = JSON.parse(g.result);
-          parsed.type = parsed.type || g.tool;
-          parsed.generationId = g._id;
-          if (g.metadata?.lineAnnotations) parsed.lineAnnotations = g.metadata.lineAnnotations;
-          if (g.metadata?.key) parsed.key = parsed.key || g.metadata.key;
-          if (g.metadata?.bpm) parsed.bpm = parsed.bpm || g.metadata.bpm;
-          playlist.value.push(parsed);
-          added++;
-        } catch { /* skip unparseable */ }
+        const m = g.metadata || {};
+        const item = {
+          type: g.tool,
+          generationId: g._id,
+          title: g.tool === "poetry" ? (m.title || "Poem") : (m.key ? `${m.key} | ${m.bpm || ""}bpm` : "Song"),
+        };
+        if (g.tool === "lyrics") {
+          item.lyrics = g.result;
+          item.lineAnnotations = m.lineAnnotations || [];
+          item.key = m.key;
+          item.bpm = m.bpm;
+          item.chords = m.chords;
+          item.chorusChords = m.chorusChords;
+          item.vocalRange = m.vocalRange;
+          item.rhythm = m.rhythm;
+        } else {
+          item.poem = g.result;
+          item.style = m.style;
+          item.theme = m.theme;
+          item.mood = m.mood;
+          item.devices = m.devices || [];
+        }
+        playlist.value.push(item);
+        added++;
       }
       if (page >= data.pages) break;
       page++;
