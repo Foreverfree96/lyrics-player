@@ -180,6 +180,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from "vue";
+import { Preferences } from "@capacitor/preferences";
 import { useNoteTone } from "./composables/useNoteTone.js";
 
 const {
@@ -194,11 +195,20 @@ const isCapacitor = typeof window !== "undefined" && window.location.protocol ==
 const isLocal = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)/.test(window.location.hostname) && !isCapacitor;
 const API_URL = isLocal ? "http://localhost:5000" : "https://lyrics-api.procreatorhub.com";
 const user = ref(null);
-const token = ref(localStorage.getItem("lp_token") || "");
+const token = ref("");
 const showAuth = ref(null);
 const authForm = ref({ username: "", email: "", password: "" });
 const authError = ref("");
 const authLoading = ref(false);
+
+// Load saved token from native storage (survives app updates/reinstalls)
+const initAuth = async () => {
+  const { value } = await Preferences.get({ key: "lp_token" });
+  if (value) {
+    token.value = value;
+    await checkAuth();
+  }
+};
 
 const checkAuth = async () => {
   if (!token.value) return;
@@ -210,11 +220,11 @@ const checkAuth = async () => {
       user.value = await res.json();
     } else {
       token.value = "";
-      localStorage.removeItem("lp_token");
+      await Preferences.remove({ key: "lp_token" });
     }
-  } catch { /* offline */ }
+  } catch { /* offline — keep token, user stays logged in */ }
 };
-checkAuth();
+initAuth();
 
 const handleAuth = async () => {
   authError.value = "";
@@ -232,7 +242,7 @@ const handleAuth = async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.message || "Auth failed");
     token.value = data.token;
-    localStorage.setItem("lp_token", data.token);
+    await Preferences.set({ key: "lp_token", value: data.token });
     user.value = data;
     showAuth.value = null;
     authForm.value = { username: "", email: "", password: "" };
@@ -243,10 +253,10 @@ const handleAuth = async () => {
   }
 };
 
-const logout = () => {
+const logout = async () => {
   user.value = null;
   token.value = "";
-  localStorage.removeItem("lp_token");
+  await Preferences.remove({ key: "lp_token" });
 };
 
 // ── Playlist (persisted to localStorage) ──
