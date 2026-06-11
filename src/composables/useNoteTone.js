@@ -79,14 +79,31 @@ let masterVolume = null;
 
 const volume = ref(0.8); // 0–1
 
-function getContext() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    masterVolume = audioCtx.createGain();
-    masterVolume.gain.value = volume.value;
-    masterVolume.connect(audioCtx.destination);
+function createContext() {
+  if (audioCtx) {
+    try { audioCtx.close(); } catch {}
   }
-  if (audioCtx.state === "suspended") audioCtx.resume();
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterVolume = audioCtx.createGain();
+  masterVolume.gain.value = volume.value;
+  masterVolume.connect(audioCtx.destination);
+
+  // Auto-recover when Bluetooth or audio route changes suspend the context
+  audioCtx.onstatechange = () => {
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {});
+    }
+  };
+
+  return audioCtx;
+}
+
+function getContext() {
+  // Recreate if closed (Bluetooth disconnect can kill it)
+  if (!audioCtx || audioCtx.state === "closed") {
+    createContext();
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
   masterVolume.gain.value = volume.value;
   return audioCtx;
 }
@@ -100,6 +117,19 @@ function warmUp() {
   src.buffer = buf;
   src.connect(ctx.destination);
   src.start();
+}
+
+// Re-unlock audio when app comes back to foreground or audio route changes
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && audioCtx) {
+      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    }
+  });
+  // Capacitor/Android fires this when Bluetooth connects/disconnects
+  document.addEventListener("resume", () => {
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  });
 }
 
 function getDest() {
@@ -303,6 +333,8 @@ export function useNoteTone() {
   // ── Sing a single line — plays the vocal tone for the note ──────────────
   const singLine = (text, note) => {
     if (!text || !note) return Promise.resolve();
+    // Ensure audio context is alive (Bluetooth can suspend between lines)
+    getContext();
     const duration = getLineDuration(text);
     playVocalTone(note, duration);
     return new Promise(r => setTimeout(r, duration * 1000));
