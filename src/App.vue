@@ -2,7 +2,7 @@
   <div class="app">
     <!-- Auth bar -->
     <header class="top-bar">
-      <h1 class="logo">Lyrics Player</h1>
+      <h1 class="logo">Creator Hub</h1>
       <div v-if="user" class="user-info">
         <span class="username">{{ user.username }}</span>
         <button class="btn-sm" @click="logout">Log out</button>
@@ -33,12 +33,99 @@
       </div>
     </div>
 
-    <!-- Upload zone -->
+    <!-- Admin gate -->
+    <div v-if="user && !isAdmin" class="admin-gate">
+      <div class="admin-gate-inner">
+        <div class="admin-icon">&#128274;</div>
+        <h2>Admin Access Only</h2>
+        <p>This app is currently restricted to admin users.</p>
+        <button class="btn-sm" @click="logout">Log out</button>
+      </div>
+    </div>
+
+    <!-- Tab bar (visible when logged in as admin) -->
+    <div v-else-if="user && isAdmin" class="tab-bar">
+      <button :class="['tab-btn', { active: activeTab === 'ai' }]" @click="activeTab = 'ai'">AI</button>
+      <button :class="['tab-btn', { active: activeTab === 'spotify' }]" @click="activeTab = 'spotify'; fetchSpotifyPlaylists()">Spotify</button>
+      <button :class="['tab-btn', { active: activeTab === 'youtube' }]" @click="activeTab = 'youtube'; fetchYoutubePlaylists()">YouTube</button>
+      <button :class="['tab-btn', { active: activeTab === 'inbox' }]" @click="activeTab = 'inbox'; fetchPhoneInbox()">Inbox</button>
+    </div>
+
+    <!-- Spotify playlists tab -->
+    <div v-if="user && isAdmin && activeTab === 'spotify'" class="platform-section">
+      <div v-if="loadingSpotify" class="loading-msg">Loading Spotify playlists...</div>
+      <div v-else-if="!activeSpotifyPlaylist" class="playlist-grid">
+        <div v-for="pl in spotifyPlaylists" :key="pl.id" class="playlist-card" @click="fetchSpotifyTracks(pl.id)">
+          <img v-if="pl.image" :src="pl.image" class="playlist-thumb" />
+          <div class="playlist-info">
+            <span class="playlist-name">{{ pl.name }}</span>
+            <span class="playlist-count">{{ pl.tracks }} tracks</span>
+          </div>
+        </div>
+        <p v-if="!spotifyPlaylists.length" class="empty-msg">No Spotify playlists found</p>
+      </div>
+      <div v-else class="track-list-view">
+        <button class="btn-sm back-btn" @click="activeSpotifyPlaylist = null; spotifyTracks = []">&larr; Back</button>
+        <div v-for="t in spotifyTracks" :key="t.id || t.uri" class="track-item">
+          <img v-if="t.album?.images?.[0]?.url" :src="t.album.images[0].url" class="track-thumb" />
+          <div class="track-info">
+            <span class="track-name">{{ t.name }}</span>
+            <span class="track-artist">{{ t.artists?.map(a => a.name).join(', ') }}</span>
+          </div>
+          <a :href="'https://open.spotify.com/track/' + (t.id || t.uri?.split(':').pop())" target="_blank" class="track-link">Open</a>
+        </div>
+        <p v-if="!spotifyTracks.length" class="empty-msg">No tracks found</p>
+      </div>
+    </div>
+
+    <!-- YouTube playlists tab -->
+    <div v-if="user && isAdmin && activeTab === 'youtube'" class="platform-section">
+      <div v-if="loadingYoutube" class="loading-msg">Loading YouTube playlists...</div>
+      <div v-else-if="!activeYoutubePlaylist" class="playlist-grid">
+        <div v-for="pl in youtubePlaylists" :key="pl.id" class="playlist-card" @click="fetchYoutubeTracks(pl.id)">
+          <img v-if="pl.image" :src="pl.image" class="playlist-thumb" />
+          <div class="playlist-info">
+            <span class="playlist-name">{{ pl.name }}</span>
+            <span class="playlist-count">{{ pl.tracks }} tracks</span>
+          </div>
+        </div>
+        <p v-if="!youtubePlaylists.length" class="empty-msg">No YouTube playlists found</p>
+      </div>
+      <div v-else class="track-list-view">
+        <button class="btn-sm back-btn" @click="activeYoutubePlaylist = null; youtubeTracks = []">&larr; Back</button>
+        <div v-for="t in youtubeTracks" :key="t.videoId || t.id" class="track-item">
+          <img v-if="t.thumbnail" :src="t.thumbnail" class="track-thumb" />
+          <div class="track-info">
+            <span class="track-name">{{ t.title || t.name }}</span>
+            <span class="track-artist">{{ t.channelTitle || t.artist || '' }}</span>
+          </div>
+          <a :href="'https://youtube.com/watch?v=' + (t.videoId || t.id)" target="_blank" class="track-link">Open</a>
+        </div>
+        <p v-if="!youtubeTracks.length" class="empty-msg">No tracks found</p>
+      </div>
+    </div>
+
+    <!-- Phone inbox tab -->
+    <div v-if="user && isAdmin && activeTab === 'inbox'" class="platform-section">
+      <div v-if="loadingInbox" class="loading-msg">Loading inbox...</div>
+      <div v-else-if="!phoneInbox.length" class="empty-msg" style="padding:40px">No items in inbox</div>
+      <div v-else class="inbox-list">
+        <button v-if="phoneInbox.length > 1" class="btn accent import-all-btn" @click="importAllInbox">Import All ({{ phoneInbox.length }})</button>
+        <div v-for="item in phoneInbox" :key="item._id" class="inbox-item">
+          <span class="inbox-type" :class="'type-' + item.generation?.tool">{{ item.generation?.tool }}</span>
+          <span class="inbox-prompt">{{ item.generation?.prompt?.slice(0, 60) || item.generation?.metadata?.title || 'Untitled' }}</span>
+          <button class="btn-sm accent" @click="importInboxItem(item)">Import</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI tab: Upload zone -->
+    <template v-if="!user || (isAdmin && activeTab === 'ai')">
     <div v-if="!playlist.length" class="upload-zone" @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="handleDrop" :class="{ hover: dragOver }">
       <div class="upload-inner">
         <div class="upload-icon">+</div>
-        <p class="upload-title">Import Lyrics / Poetry</p>
-        <p class="upload-sub">Load .json files exported from AI Studio</p>
+        <p class="upload-title">Import AI Content</p>
+        <p class="upload-sub">Load .json files or import from your account</p>
         <div class="import-actions">
           <label class="import-btn">
             Browse Files
@@ -96,8 +183,8 @@
             </div>
           </div>
 
-          <!-- Volume -->
-          <div class="volume-row">
+          <!-- Volume (lyrics only) -->
+          <div v-if="active.type === 'lyrics'" class="volume-row">
             <button class="vol-mute" @click="toggleMute">{{ muted ? 'Unmute' : 'Mute' }}</button>
             <input type="range" min="0" max="1" step="0.01" v-model.number="vol" @input="setVolume(vol)" class="vol-slider" />
             <span class="vol-label">{{ Math.round(vol * 100) }}%</span>
@@ -156,9 +243,43 @@
             </div>
           </div>
 
+          <!-- Image -->
+          <div v-if="active.type === 'image'" class="image-section">
+            <div class="image-prompt">{{ active.prompt }}</div>
+            <img :src="active.imageUrl" class="generated-image" alt="AI Generated" />
+          </div>
+
+          <!-- Rhyme -->
+          <div v-if="active.type === 'rhyme'" class="rhyme-section">
+            <div class="rhyme-prompt">Word: {{ active.prompt }}</div>
+            <div v-if="active.rhymes?.length" class="rhyme-group">
+              <h4 class="rhyme-group-label">Perfect Rhymes</h4>
+              <div class="rhyme-chips">
+                <span v-for="r in active.rhymes" :key="r" class="rhyme-chip">{{ r }}</span>
+              </div>
+            </div>
+            <div v-if="active.multiSyllable?.length" class="rhyme-group">
+              <h4 class="rhyme-group-label">Multi-Syllable</h4>
+              <div class="rhyme-chips">
+                <span v-for="r in active.multiSyllable" :key="r" class="rhyme-chip multi">{{ r }}</span>
+              </div>
+            </div>
+            <div v-if="active.slantRhymes?.length" class="rhyme-group">
+              <h4 class="rhyme-group-label">Slant Rhymes</h4>
+              <div class="rhyme-chips">
+                <span v-for="r in active.slantRhymes" :key="r" class="rhyme-chip slant">{{ r }}</span>
+              </div>
+            </div>
+            <div v-if="active.phrases?.length" class="rhyme-group">
+              <h4 class="rhyme-group-label">Example Phrases</h4>
+              <div v-for="(p, pi) in active.phrases" :key="pi" class="phrase-line">{{ p }}</div>
+            </div>
+          </div>
+
         </div>
       </main>
     </div>
+    </template>
 
     <!-- Fixed bottom player bar -->
     <div v-if="isSinging" class="player-bar">
@@ -190,16 +311,19 @@ const {
 } = useNoteTone();
 
 // ── Auth ──
-// Use tunnel on Capacitor (native app), localhost only on actual PC browser
-const isCapacitor = typeof window !== "undefined" && window.location.protocol === "https:" && window.location.hostname === "localhost";
-const isLocal = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)/.test(window.location.hostname) && !isCapacitor;
-const API_URL = isLocal ? "http://localhost:5000" : "https://lyrics-api.procreatorhub.com";
+// Native (Capacitor) builds always use the real backend.
+// Only a desktop browser at localhost uses the dev server.
+const isNative = !!(window.Capacitor?.isNativePlatform?.());
+const isLocalDev = !isNative && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+const API_URL = isLocalDev ? "http://localhost:5000" : "https://lyrics-api.procreatorhub.com";
 const user = ref(null);
 const token = ref("");
 const showAuth = ref(null);
 const authForm = ref({ username: "", email: "", password: "" });
 const authError = ref("");
 const authLoading = ref(false);
+const isAdmin = computed(() => !!user.value?.isAdmin);
+const activeTab = ref('ai');
 
 // Load saved token from native storage (survives app updates/reinstalls)
 const initAuth = async () => {
@@ -234,12 +358,22 @@ const handleAuth = async () => {
     ? { email: authForm.value.email, password: authForm.value.password }
     : { username: authForm.value.username, email: authForm.value.email, password: authForm.value.password };
   try {
-    const res = await fetch(API_URL + "/api/users" + endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    const data = await res.json();
+    let res;
+    try {
+      res = await fetch(API_URL + "/api/users" + endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+    } catch {
+      throw new Error("Can't reach server — check your connection");
+    }
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error(`Server error (${res.status})`);
+    }
     if (!res.ok) throw new Error(data.message || "Auth failed");
     token.value = data.token;
     await Preferences.set({ key: "lp_token", value: data.token });
@@ -319,6 +453,40 @@ const loadFiles = async (files) => {
 const handleDrop = (e) => { loadFiles(e.dataTransfer.files); };
 const handleFileInput = (e) => { loadFiles(e.target.files); e.target.value = ""; };
 
+// ── Generation → playlist item converter ──
+const generationToPlaylistItem = (g) => {
+  const m = g.metadata || {};
+  const item = { type: g.tool, generationId: g._id };
+  switch (g.tool) {
+    case "lyrics":
+      item.title = m.key ? `${m.key} | ${m.bpm || ""}bpm` : "Song";
+      item.lyrics = g.result;
+      item.lineAnnotations = m.lineAnnotations || [];
+      item.key = m.key; item.bpm = m.bpm;
+      item.chords = m.chords; item.chorusChords = m.chorusChords;
+      item.vocalRange = m.vocalRange; item.rhythm = m.rhythm;
+      break;
+    case "poetry":
+      item.title = m.title || "Poem";
+      item.poem = g.result;
+      item.style = m.style; item.theme = m.theme;
+      item.mood = m.mood; item.devices = m.devices || [];
+      break;
+    case "image":
+      item.title = g.prompt?.slice(0, 40) || "Image";
+      item.imageUrl = API_URL + g.result;
+      item.prompt = g.prompt;
+      break;
+    case "rhyme":
+      item.title = g.prompt?.slice(0, 40) || "Rhyme";
+      item.prompt = g.prompt;
+      item.rhymes = m.rhymes || []; item.multiSyllable = m.multiSyllable || [];
+      item.slantRhymes = m.slantRhymes || []; item.phrases = m.phrases || [];
+      break;
+  }
+  return item;
+};
+
 // ── Import from account ──
 const importingAccount = ref(false);
 const importError = ref("");
@@ -339,31 +507,9 @@ const importFromAccount = async () => {
       if (!res.ok) throw new Error("Failed to load history");
       const data = await res.json();
       for (const g of data.generations) {
-        if (g.tool !== "lyrics" && g.tool !== "poetry") continue;
+        if (!["lyrics", "poetry", "image", "rhyme"].includes(g.tool)) continue;
         if (existingIds.has(g._id)) { skipped++; continue; }
-        const m = g.metadata || {};
-        const item = {
-          type: g.tool,
-          generationId: g._id,
-          title: g.tool === "poetry" ? (m.title || "Poem") : (m.key ? `${m.key} | ${m.bpm || ""}bpm` : "Song"),
-        };
-        if (g.tool === "lyrics") {
-          item.lyrics = g.result;
-          item.lineAnnotations = m.lineAnnotations || [];
-          item.key = m.key;
-          item.bpm = m.bpm;
-          item.chords = m.chords;
-          item.chorusChords = m.chorusChords;
-          item.vocalRange = m.vocalRange;
-          item.rhythm = m.rhythm;
-        } else {
-          item.poem = g.result;
-          item.style = m.style;
-          item.theme = m.theme;
-          item.mood = m.mood;
-          item.devices = m.devices || [];
-        }
-        playlist.value.push(item);
+        playlist.value.push(generationToPlaylistItem(g));
         existingIds.add(g._id);
         added++;
       }
@@ -371,12 +517,119 @@ const importFromAccount = async () => {
       page++;
     }
     if (added === 0) {
-      importError.value = skipped > 0 ? `All ${skipped} songs already imported` : "No lyrics or poetry found in your history";
+      importError.value = skipped > 0 ? `All ${skipped} items already imported` : "No AI generations found in your history";
     }
   } catch (e) {
     importError.value = e.message;
   } finally {
     importingAccount.value = false;
+  }
+};
+
+// ── Spotify playlists ──
+const spotifyPlaylists = ref([]);
+const spotifyTracks = ref([]);
+const activeSpotifyPlaylist = ref(null);
+const loadingSpotify = ref(false);
+
+const fetchSpotifyPlaylists = async () => {
+  if (!token.value || spotifyPlaylists.value.length) return;
+  loadingSpotify.value = true;
+  try {
+    const res = await fetch(API_URL + "/api/spotify/playlists", {
+      headers: { Authorization: "Bearer " + token.value }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      spotifyPlaylists.value = data.playlists || [];
+    }
+  } catch { /* offline */ }
+  finally { loadingSpotify.value = false; }
+};
+
+const fetchSpotifyTracks = async (playlistId) => {
+  activeSpotifyPlaylist.value = playlistId;
+  spotifyTracks.value = [];
+  try {
+    const res = await fetch(API_URL + "/api/spotify/playlist/" + playlistId + "/tracks");
+    if (res.ok) {
+      const data = await res.json();
+      spotifyTracks.value = data.items || [];
+    }
+  } catch { /* offline */ }
+};
+
+// ── YouTube playlists ──
+const youtubePlaylists = ref([]);
+const youtubeTracks = ref([]);
+const activeYoutubePlaylist = ref(null);
+const loadingYoutube = ref(false);
+
+const fetchYoutubePlaylists = async () => {
+  if (!token.value || youtubePlaylists.value.length) return;
+  loadingYoutube.value = true;
+  try {
+    const res = await fetch(API_URL + "/api/youtube/playlists", {
+      headers: { Authorization: "Bearer " + token.value }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      youtubePlaylists.value = data.playlists || [];
+    }
+  } catch { /* offline */ }
+  finally { loadingYoutube.value = false; }
+};
+
+const fetchYoutubeTracks = async (playlistId) => {
+  activeYoutubePlaylist.value = playlistId;
+  youtubeTracks.value = [];
+  try {
+    const res = await fetch(API_URL + "/api/youtube/playlist/" + playlistId + "/tracks", {
+      headers: { Authorization: "Bearer " + token.value }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      youtubeTracks.value = data.items || [];
+    }
+  } catch { /* offline */ }
+};
+
+// ── Phone inbox ──
+const phoneInbox = ref([]);
+const loadingInbox = ref(false);
+
+const fetchPhoneInbox = async () => {
+  if (!token.value) return;
+  loadingInbox.value = true;
+  try {
+    const res = await fetch(API_URL + "/api/phone-queue", {
+      headers: { Authorization: "Bearer " + token.value }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      phoneInbox.value = data.items || [];
+    }
+  } catch { /* offline */ }
+  finally { loadingInbox.value = false; }
+};
+
+const importInboxItem = async (queueItem) => {
+  const g = queueItem.generation;
+  if (!g) return;
+  playlist.value.push(generationToPlaylistItem(g));
+  try {
+    await fetch(API_URL + "/api/phone-queue/" + queueItem._id, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + token.value }
+    });
+  } catch { /* imported even if delete fails */ }
+  phoneInbox.value = phoneInbox.value.filter(i => i._id !== queueItem._id);
+  activeTab.value = "ai";
+};
+
+const importAllInbox = async () => {
+  for (const item of [...phoneInbox.value]) {
+    await importInboxItem(item);
   }
 };
 
@@ -420,9 +673,12 @@ const tpChord = (c) => c ? transposeChord(c, transposeSemitones.value) : "";
 const singableLines = computed(() => {
   const lines = [];
   const indexMap = [];
+  // Default note from the song's key (e.g. "A minor" → "A4"), fallback to C4
+  const keyMatch = active.value?.key?.match(/^([A-Ga-g][#b]?)/);
+  const defaultNote = keyMatch ? keyMatch[1] + "4" : "C4";
   parsedLines.value.forEach((line, i) => {
-    if (line.note) {
-      lines.push(line);
+    if (line.text.trim()) {
+      lines.push({ ...line, note: line.note || defaultNote });
       indexMap.push(i);
     }
   });
@@ -725,11 +981,115 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
 /* Add bottom padding when bar is visible so content isn't hidden behind it */
 .lines-container { padding-bottom: 70px; }
 
+/* Admin gate */
+.admin-gate {
+  flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px;
+}
+.admin-gate-inner {
+  text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.admin-gate h2 { color: #c4b5fd; font-size: 1.3rem; }
+.admin-gate p { color: #888; font-size: 0.9rem; }
+.admin-icon { font-size: 2.5rem; }
+
+/* Tab bar */
+.tab-bar {
+  display: flex; gap: 0; border-bottom: 1px solid #222; background: #141414;
+  padding: 0 16px; overflow-x: auto;
+}
+.tab-btn {
+  padding: 10px 18px; background: none; border: none; border-bottom: 2px solid transparent;
+  color: #888; font-size: 0.85rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.tab-btn.active { color: #c4b5fd; border-bottom-color: #6b21a8; }
+.tab-btn:hover { color: #e5e5e5; }
+
+/* Platform sections (Spotify, YouTube, Inbox) */
+.platform-section { flex: 1; overflow-y: auto; padding: 20px; }
+.loading-msg { color: #888; text-align: center; padding: 40px; }
+.empty-msg { color: #666; text-align: center; font-size: 0.9rem; }
+
+/* Playlist grid */
+.playlist-grid { display: flex; flex-direction: column; gap: 8px; }
+.playlist-card {
+  display: flex; align-items: center; gap: 12px; padding: 12px;
+  background: #1a1a1a; border-radius: 10px; cursor: pointer; border: 1px solid #222;
+  transition: background 0.15s;
+}
+.playlist-card:hover { background: #222; }
+.playlist-thumb { width: 56px; height: 56px; border-radius: 6px; object-fit: cover; }
+.playlist-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.playlist-name { font-size: 0.9rem; font-weight: 700; color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.playlist-count { font-size: 0.75rem; color: #888; }
+
+/* Track list */
+.track-list-view { display: flex; flex-direction: column; gap: 6px; }
+.back-btn { align-self: flex-start; margin-bottom: 8px; }
+.track-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  background: #1a1a1a; border-radius: 8px; border: 1px solid #1f1f1f;
+}
+.track-thumb { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; }
+.track-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.track-name { font-size: 0.85rem; font-weight: 600; color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-artist { font-size: 0.75rem; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-link {
+  font-size: 0.75rem; font-weight: 700; color: #a78bfa; text-decoration: none;
+  padding: 4px 10px; border: 1px solid #6b21a8; border-radius: 6px; white-space: nowrap;
+}
+.track-link:hover { background: #6b21a8; color: #fff; }
+
+/* Inbox */
+.inbox-list { display: flex; flex-direction: column; gap: 8px; }
+.import-all-btn { align-self: flex-start; margin-bottom: 8px; font-size: 0.82rem; padding: 8px 16px; }
+.inbox-item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  background: #1a1a1a; border-radius: 8px; border: 1px solid #222;
+}
+.inbox-type {
+  font-size: 0.7rem; font-weight: 800; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 10px; background: #6b21a8; color: #fff;
+}
+.inbox-type.type-image { background: #14532d; }
+.inbox-type.type-rhyme { background: #78350f; }
+.inbox-type.type-poetry { background: #1e3a5f; }
+.inbox-prompt { flex: 1; font-size: 0.82rem; color: #ccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Image section */
+.image-section { text-align: center; }
+.image-prompt { font-size: 0.85rem; color: #888; margin-bottom: 16px; font-style: italic; }
+.generated-image { max-width: 100%; border-radius: 12px; border: 1px solid #333; }
+
+/* Rhyme section */
+.rhyme-section { display: flex; flex-direction: column; gap: 16px; }
+.rhyme-prompt { font-size: 1rem; font-weight: 700; color: #c4b5fd; }
+.rhyme-group { display: flex; flex-direction: column; gap: 8px; }
+.rhyme-group-label { font-size: 0.85rem; font-weight: 800; color: #a78bfa; }
+.rhyme-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rhyme-chip {
+  padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
+  background: #2d1b69; color: #c4b5fd;
+}
+.rhyme-chip.multi { background: #14532d; color: #86efac; }
+.rhyme-chip.slant { background: #78350f; color: #fbbf24; }
+.phrase-line {
+  font-family: Georgia, serif; font-size: 0.9rem; color: #ccc;
+  padding: 4px 0; line-height: 1.7; font-style: italic;
+}
+
+/* Sidebar type colors */
+.pl-type {
+  font-size: 0.7rem; color: #666; text-transform: uppercase;
+}
+
 /* Mobile */
 @media (max-width: 700px) {
   .player-layout { flex-direction: column; }
   .sidebar { width: 100%; min-width: unset; max-height: 180px; border-right: none; border-bottom: 1px solid #222; }
   .content { padding: 16px; padding-bottom: 80px; }
   .meta-row { gap: 6px; }
+  .tab-bar { padding: 0 8px; }
+  .tab-btn { padding: 10px 12px; font-size: 0.8rem; }
+  .platform-section { padding: 14px; }
 }
 </style>

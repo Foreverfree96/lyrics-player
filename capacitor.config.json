@@ -1,6 +1,6 @@
 {
   "appId": "com.procreatorhub.lyricsplayer",
-  "appName": "Lyrics Player",
+  "appName": "Creator Hub",
   "webDir": "dist",
   "server": {
     "androidScheme": "https",
