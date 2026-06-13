@@ -33,26 +33,230 @@
       </div>
     </div>
 
-    <!-- Admin gate -->
-    <div v-if="user && !isAdmin" class="admin-gate">
-      <div class="admin-gate-inner">
-        <div class="admin-icon">&#128274;</div>
-        <h2>Admin Access Only</h2>
-        <p>This app is currently restricted to admin users.</p>
-        <button class="btn-sm" @click="logout">Log out</button>
+    <!-- Add to playlist modal -->
+    <div v-if="showAddToPlaylist" class="modal-overlay" @click.self="showAddToPlaylist = null">
+      <div class="modal">
+        <h2>Add to Playlist</h2>
+        <div class="playlist-pick-list">
+          <div v-for="pl in localPlaylists" :key="pl.id" class="playlist-pick-item" @click="handleAddToPlaylist(pl.id)">
+            {{ pl.name }} <span class="pick-count">({{ pl.items?.length || 0 }})</span>
+          </div>
+          <p v-if="!localPlaylists.length" class="empty-msg" style="padding:12px">No playlists yet</p>
+        </div>
+        <form class="new-pl-form" @submit.prevent="handleCreateAndAdd">
+          <input v-model="newPlaylistName" placeholder="New playlist name..." class="input" />
+          <button class="btn-sm accent" type="submit" :disabled="!newPlaylistName.trim()">Create & Add</button>
+        </form>
       </div>
     </div>
 
-    <!-- Tab bar (visible when logged in as admin) -->
-    <div v-else-if="user && isAdmin" class="tab-bar">
-      <button :class="['tab-btn', { active: activeTab === 'ai' }]" @click="activeTab = 'ai'">AI</button>
+    <!-- Tab bar -->
+    <div v-if="user" class="tab-bar">
+      <button :class="['tab-btn', { active: activeTab === 'library' }]" @click="activeTab = 'library'">Library</button>
+      <button :class="['tab-btn', { active: activeTab === 'posts' }]" @click="activeTab = 'posts'">Posts</button>
+      <button :class="['tab-btn', { active: activeTab === 'playlists' }]" @click="activeTab = 'playlists'">Playlists</button>
       <button :class="['tab-btn', { active: activeTab === 'spotify' }]" @click="activeTab = 'spotify'; fetchSpotifyPlaylists()">Spotify</button>
       <button :class="['tab-btn', { active: activeTab === 'youtube' }]" @click="activeTab = 'youtube'; fetchYoutubePlaylists()">YouTube</button>
-      <button :class="['tab-btn', { active: activeTab === 'inbox' }]" @click="activeTab = 'inbox'; fetchPhoneInbox()">Inbox</button>
+      <button :class="['tab-btn', { active: activeTab === 'sync' }]" @click="activeTab = 'sync'">Sync</button>
     </div>
 
-    <!-- Spotify playlists tab -->
-    <div v-if="user && isAdmin && activeTab === 'spotify'" class="platform-section">
+    <!-- Not logged in -->
+    <div v-if="!user" class="admin-gate">
+      <div class="admin-gate-inner">
+        <div class="admin-icon">&#127925;</div>
+        <h2>Creator Hub</h2>
+        <p>Log in to sync your AI generations, posts, and playlists.</p>
+      </div>
+    </div>
+
+    <!-- Viewer (when an item is selected) -->
+    <div v-if="user && activeItem" class="player-layout">
+      <div class="viewer-header">
+        <button class="btn-sm back-btn" @click="activeItem = null">&larr; Back</button>
+        <button class="btn-sm" @click="showAddToPlaylist = activeItem">+ Playlist</button>
+      </div>
+      <main class="content">
+        <div class="now-playing">
+          <h2 class="song-title">{{ activeItem.title }}</h2>
+
+          <!-- Lyrics viewer -->
+          <template v-if="activeItem.tool === 'lyrics'">
+            <div class="meta-row">
+              <span v-if="activeItem.metadata?.key" class="pill key-pill">Key: {{ displayKey }}</span>
+              <span v-if="activeItem.metadata?.bpm" class="pill">{{ activeItem.metadata.bpm }} BPM</span>
+              <div class="transpose-controls" v-if="activeItem.metadata?.key">
+                <button class="tp-btn" @click="transposeSemitones--">-</button>
+                <span class="tp-val">{{ transposeSemitones >= 0 ? '+' : '' }}{{ transposeSemitones }}</span>
+                <button class="tp-btn" @click="transposeSemitones++">+</button>
+                <button v-if="transposeSemitones !== 0" class="tp-btn reset" @click="transposeSemitones = 0">Reset</button>
+              </div>
+            </div>
+            <div v-if="activeItem.tool === 'lyrics'" class="volume-row">
+              <button class="vol-mute" @click="toggleMute">{{ muted ? 'Unmute' : 'Mute' }}</button>
+              <input type="range" min="0" max="1" step="0.01" v-model.number="vol" @input="setVolume(vol)" class="vol-slider" />
+              <span class="vol-label">{{ Math.round(vol * 100) }}%</span>
+            </div>
+            <div class="controls">
+              <button v-if="!isSinging" class="btn accent" @click="startSinging">Sing All</button>
+              <button v-if="isSinging && !isPaused" class="btn" @click="pauseSinging">Pause</button>
+              <button v-if="isSinging && isPaused" class="btn accent" @click="resumeSinging">Resume</button>
+              <button v-if="isSinging" class="btn danger" @click="stopSinging">Stop</button>
+            </div>
+            <div v-if="parsedLines.length" class="lines-container" ref="linesContainer">
+              <div v-for="(line, idx) in parsedLines" :key="idx"
+                class="lyric-line-wrap"
+                :class="{ singing: isSinging && displayLineIdx === idx, past: isSinging && idx < displayLineIdx }"
+                @click="handleLineClick(idx)">
+                <div class="lyric-line">
+                  <span class="line-num">{{ idx + 1 }}</span>
+                  <span class="line-text">{{ line.text }}</span>
+                  <span v-if="line.note" class="line-note">{{ tpNote(line.note) }}</span>
+                  <span v-if="line.chord" class="line-chord">{{ tpChord(line.chord) }}</span>
+                  <span v-if="line.direction" class="line-dir">{{ line.direction }}</span>
+                </div>
+                <div v-if="isSinging && displayLineIdx === idx" class="hold-bar"
+                  :style="{ animationDuration: getLineDuration(line.text) + 's' }"></div>
+              </div>
+            </div>
+            <div v-if="activeItem.metadata?.chorus" class="chorus-section">
+              <h4 class="chorus-label">Chorus</h4>
+              <pre class="chorus-text">{{ activeItem.metadata.chorus }}</pre>
+            </div>
+          </template>
+
+          <!-- Poetry viewer -->
+          <template v-if="activeItem.tool === 'poetry'">
+            <div class="poem-section">
+              <div v-for="(line, idx) in poemLines" :key="idx" class="poem-line">{{ line }}</div>
+              <div v-if="activeItem.metadata?.mood" class="mood-box"><strong>Reading guidance:</strong> {{ activeItem.metadata.mood }}</div>
+              <div v-if="activeItem.metadata?.devices?.length" class="devices-section">
+                <h4>Literary Devices</h4>
+                <div v-for="(d, di) in activeItem.metadata.devices" :key="di" class="device-card">
+                  <span class="device-name">{{ d.device }}</span>
+                  <span class="device-example">"{{ d.example }}"</span>
+                  <span class="device-explain">{{ d.explanation }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- Image viewer -->
+          <template v-if="activeItem.tool === 'image'">
+            <div class="image-section">
+              <div class="image-prompt">{{ activeItem.prompt }}</div>
+              <img :src="activeItemImageSrc" class="generated-image" alt="AI Generated" />
+            </div>
+          </template>
+
+          <!-- Rhyme viewer -->
+          <template v-if="activeItem.tool === 'rhyme'">
+            <div class="rhyme-section">
+              <div class="rhyme-prompt">Word: {{ activeItem.prompt }}</div>
+              <div v-if="activeItem.metadata?.rhymes?.length" class="rhyme-group">
+                <h4 class="rhyme-group-label">Perfect Rhymes</h4>
+                <div class="rhyme-chips">
+                  <span v-for="r in activeItem.metadata.rhymes" :key="r" class="rhyme-chip">{{ r }}</span>
+                </div>
+              </div>
+              <div v-if="activeItem.metadata?.multiSyllable?.length" class="rhyme-group">
+                <h4 class="rhyme-group-label">Multi-Syllable</h4>
+                <div class="rhyme-chips">
+                  <span v-for="r in activeItem.metadata.multiSyllable" :key="r" class="rhyme-chip multi">{{ r }}</span>
+                </div>
+              </div>
+              <div v-if="activeItem.metadata?.slantRhymes?.length" class="rhyme-group">
+                <h4 class="rhyme-group-label">Slant Rhymes</h4>
+                <div class="rhyme-chips">
+                  <span v-for="r in activeItem.metadata.slantRhymes" :key="r" class="rhyme-chip slant">{{ r }}</span>
+                </div>
+              </div>
+              <div v-if="activeItem.metadata?.phrases?.length" class="rhyme-group">
+                <h4 class="rhyme-group-label">Example Phrases</h4>
+                <div v-for="(p, pi) in activeItem.metadata.phrases" :key="pi" class="phrase-line">{{ p }}</div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </main>
+    </div>
+
+    <!-- Library tab -->
+    <div v-if="user && !activeItem && activeTab === 'library'" class="platform-section">
+      <div class="filter-chips">
+        <button :class="['chip', { active: libraryFilter === '' }]" @click="libraryFilter = ''">All</button>
+        <button :class="['chip', { active: libraryFilter === 'lyrics' }]" @click="libraryFilter = 'lyrics'">Lyrics</button>
+        <button :class="['chip', { active: libraryFilter === 'poetry' }]" @click="libraryFilter = 'poetry'">Poetry</button>
+        <button :class="['chip', { active: libraryFilter === 'image' }]" @click="libraryFilter = 'image'">Images</button>
+        <button :class="['chip', { active: libraryFilter === 'rhyme' }]" @click="libraryFilter = 'rhyme'">Rhymes</button>
+      </div>
+      <div v-if="filteredGenerations.length" class="item-grid">
+        <div v-for="gen in filteredGenerations" :key="gen.id" class="item-card" @click="openItem(gen)">
+          <img v-if="gen.tool === 'image' && gen.imageLocalPath" :src="gen._localUrl" class="item-thumb" />
+          <div v-else class="item-icon" :class="'icon-' + gen.tool">{{ toolIcon(gen.tool) }}</div>
+          <div class="item-info">
+            <span class="item-title">{{ gen.title }}</span>
+            <span class="item-type">{{ gen.tool }}</span>
+          </div>
+          <button class="pl-remove" @click.stop="handleRemoveGeneration(gen.id)" title="Remove">&times;</button>
+        </div>
+      </div>
+      <p v-else class="empty-msg" style="padding:40px">No content yet. Go to Sync to pull from your account.</p>
+    </div>
+
+    <!-- Posts tab -->
+    <div v-if="user && !activeItem && activeTab === 'posts'" class="platform-section">
+      <div v-if="localPosts.length" class="item-grid">
+        <div v-for="post in localPosts" :key="post.id" class="item-card post-card">
+          <img v-if="post.imageLocalPath || post.imageUrl" :src="post._localUrl || post.imageUrl" class="item-thumb" />
+          <div class="item-info">
+            <span class="item-title">{{ post.title || post.body?.slice(0, 50) || 'Untitled' }}</span>
+            <span class="item-type">{{ post.category || 'Post' }} &middot; {{ post.likesCount }} likes</span>
+          </div>
+          <button class="pl-remove" @click.stop="handleRemovePost(post.id)" title="Remove">&times;</button>
+        </div>
+      </div>
+      <p v-else class="empty-msg" style="padding:40px">No posts synced yet. Go to Sync to pull your posts.</p>
+    </div>
+
+    <!-- Playlists tab -->
+    <div v-if="user && !activeItem && activeTab === 'playlists'" class="platform-section">
+      <form class="new-pl-form top-form" @submit.prevent="handleCreatePlaylist">
+        <input v-model="newPlaylistName" placeholder="New playlist name..." class="input" />
+        <button class="btn-sm accent" type="submit" :disabled="!newPlaylistName.trim()">Create</button>
+      </form>
+      <div v-if="localPlaylists.length" class="playlist-grid">
+        <div v-for="pl in localPlaylists" :key="pl.id" class="playlist-card" @click="openPlaylist(pl)">
+          <div class="pl-icon">&#9835;</div>
+          <div class="playlist-info">
+            <span class="playlist-name">{{ pl.name }}</span>
+            <span class="playlist-count">{{ pl.items?.length || 0 }} items</span>
+          </div>
+          <button class="pl-remove" @click.stop="handleRemovePlaylist(pl.id)" title="Remove">&times;</button>
+        </div>
+      </div>
+
+      <!-- Playlist detail view -->
+      <div v-if="activePlaylist" class="playlist-detail">
+        <div class="detail-header">
+          <button class="btn-sm" @click="activePlaylist = null">&larr; Back</button>
+          <h3>{{ activePlaylist.name }}</h3>
+        </div>
+        <div v-if="activePlaylist.items?.length" class="item-grid">
+          <div v-for="item in activePlaylist.items" :key="item.itemId" class="item-card" @click="openItem(item)">
+            <div class="item-icon" :class="'icon-' + item.tool">{{ toolIcon(item.tool) }}</div>
+            <div class="item-info">
+              <span class="item-title">{{ item.title }}</span>
+              <span class="item-type">{{ item.tool }}</span>
+            </div>
+            <button class="pl-remove" @click.stop="handleRemoveFromPlaylist(item.itemId)" title="Remove">&times;</button>
+          </div>
+        </div>
+        <p v-else class="empty-msg" style="padding:20px">Playlist is empty</p>
+      </div>
+    </div>
+
+    <!-- Spotify tab -->
+    <div v-if="user && !activeItem && activeTab === 'spotify'" class="platform-section">
       <div v-if="loadingSpotify" class="loading-msg">Loading Spotify playlists...</div>
       <div v-else-if="!activeSpotifyPlaylist" class="playlist-grid">
         <div v-for="pl in spotifyPlaylists" :key="pl.id" class="playlist-card" @click="fetchSpotifyTracks(pl.id)">
@@ -78,8 +282,8 @@
       </div>
     </div>
 
-    <!-- YouTube playlists tab -->
-    <div v-if="user && isAdmin && activeTab === 'youtube'" class="platform-section">
+    <!-- YouTube tab -->
+    <div v-if="user && !activeItem && activeTab === 'youtube'" class="platform-section">
       <div v-if="loadingYoutube" class="loading-msg">Loading YouTube playlists...</div>
       <div v-else-if="!activeYoutubePlaylist" class="playlist-grid">
         <div v-for="pl in youtubePlaylists" :key="pl.id" class="playlist-card" @click="fetchYoutubeTracks(pl.id)">
@@ -105,188 +309,31 @@
       </div>
     </div>
 
-    <!-- Phone inbox tab -->
-    <div v-if="user && isAdmin && activeTab === 'inbox'" class="platform-section">
-      <div v-if="loadingInbox" class="loading-msg">Loading inbox...</div>
-      <div v-else-if="!phoneInbox.length" class="empty-msg" style="padding:40px">No items in inbox</div>
-      <div v-else class="inbox-list">
-        <button v-if="phoneInbox.length > 1" class="btn accent import-all-btn" @click="importAllInbox">Import All ({{ phoneInbox.length }})</button>
-        <div v-for="item in phoneInbox" :key="item._id" class="inbox-item">
-          <span class="inbox-type" :class="'type-' + item.generation?.tool">{{ item.generation?.tool }}</span>
-          <span class="inbox-prompt">{{ item.generation?.prompt?.slice(0, 60) || item.generation?.metadata?.title || 'Untitled' }}</span>
-          <button class="btn-sm accent" @click="importInboxItem(item)">Import</button>
+    <!-- Sync tab -->
+    <div v-if="user && !activeItem && activeTab === 'sync'" class="platform-section sync-section">
+      <div class="sync-card">
+        <h3>Sync from ProCreatorHub</h3>
+        <p class="sync-desc">Pull your AI generations, images, and posts from procreatorhub.com</p>
+        <div class="sync-stats">
+          <span class="sync-stat">{{ counts.generations }} generations</span>
+          <span class="sync-stat">{{ counts.posts }} posts</span>
+          <span class="sync-stat">{{ counts.playlists }} playlists</span>
         </div>
+        <p v-if="lastSyncTime" class="sync-last">Last synced: {{ lastSyncTime }}</p>
+        <button class="btn accent" @click="handleSync" :disabled="syncing">
+          {{ syncing ? syncStatus : 'Sync Now' }}
+        </button>
+        <p v-if="syncError" class="error" style="margin-top:8px">{{ syncError }}</p>
+        <p v-if="syncResult" class="sync-result">{{ syncResult }}</p>
       </div>
     </div>
-
-    <!-- AI tab: Upload zone -->
-    <template v-if="!user || (isAdmin && activeTab === 'ai')">
-    <div v-if="!playlist.length" class="upload-zone" @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="handleDrop" :class="{ hover: dragOver }">
-      <div class="upload-inner">
-        <div class="upload-icon">+</div>
-        <p class="upload-title">Import AI Content</p>
-        <p class="upload-sub">Load .json files or import from your account</p>
-        <div class="import-actions">
-          <label class="import-btn">
-            Browse Files
-            <input type="file" accept=".json,application/json" multiple @change="handleFileInput" hidden />
-          </label>
-          <button v-if="user" class="import-btn account-btn" @click="importFromAccount" :disabled="importingAccount">
-            {{ importingAccount ? 'Loading...' : 'Import from Account' }}
-          </button>
-        </div>
-        <p v-if="!user" class="upload-hint">Log in to import your AI Studio history</p>
-        <p v-if="importError" class="error" style="margin-top:8px">{{ importError }}</p>
-        <input type="file" accept=".json,application/json" multiple @change="handleFileInput" class="file-input" />
-      </div>
-    </div>
-
-    <!-- Main player -->
-    <div v-else class="player-layout">
-      <!-- Sidebar playlist -->
-      <aside class="sidebar">
-        <div class="sidebar-header">
-          <h3>Playlist</h3>
-          <label class="add-more-btn" title="Browse files">
-            +
-            <input type="file" accept=".json,application/json" multiple @change="handleFileInput" hidden />
-          </label>
-          <button v-if="user" class="add-more-btn account-import" @click="importFromAccount" :disabled="importingAccount" title="Import from account">
-            {{ importingAccount ? '...' : 'DL' }}
-          </button>
-        </div>
-        <div v-for="(item, i) in playlist" :key="i" class="pl-item" :class="{ active: activeIdx === i }" @click="setActive(i)">
-          <span class="pl-title">{{ item.title || 'Untitled' }}</span>
-          <span class="pl-type">{{ item.type || 'lyrics' }}</span>
-          <button class="pl-remove" @click.stop="removeItem(i)" title="Remove">&times;</button>
-        </div>
-      </aside>
-
-      <!-- Main content -->
-      <main class="content">
-        <div v-if="active" class="now-playing">
-          <h2 class="song-title">{{ active.title }}</h2>
-
-          <!-- Meta pills -->
-          <div class="meta-row" v-if="active.type === 'lyrics'">
-            <span v-if="active.key" class="pill key-pill">Key: {{ displayKey }}</span>
-            <span v-if="active.bpm" class="pill">{{ active.bpm }} BPM</span>
-            <span v-if="active.genre" class="pill">{{ active.genre }}</span>
-            <span v-if="active.mood" class="pill">{{ active.mood }}</span>
-
-            <!-- Transpose controls -->
-            <div class="transpose-controls" v-if="active.key">
-              <button class="tp-btn" @click="transposeSemitones--">-</button>
-              <span class="tp-val">{{ transposeSemitones >= 0 ? '+' : '' }}{{ transposeSemitones }}</span>
-              <button class="tp-btn" @click="transposeSemitones++">+</button>
-              <button v-if="transposeSemitones !== 0" class="tp-btn reset" @click="transposeSemitones = 0">Reset</button>
-            </div>
-          </div>
-
-          <!-- Volume (lyrics only) -->
-          <div v-if="active.type === 'lyrics'" class="volume-row">
-            <button class="vol-mute" @click="toggleMute">{{ muted ? 'Unmute' : 'Mute' }}</button>
-            <input type="range" min="0" max="1" step="0.01" v-model.number="vol" @input="setVolume(vol)" class="vol-slider" />
-            <span class="vol-label">{{ Math.round(vol * 100) }}%</span>
-          </div>
-
-          <!-- Controls -->
-          <div class="controls">
-            <template v-if="active.type === 'lyrics'">
-              <button v-if="!isSinging" class="btn accent" @click="startSinging">Sing All</button>
-              <button v-if="isSinging && !isPaused" class="btn" @click="pauseSinging">Pause</button>
-              <button v-if="isSinging && isPaused" class="btn accent" @click="resumeSinging">Resume</button>
-              <button v-if="isSinging" class="btn danger" @click="stopSinging">Stop</button>
-            </template>
-          </div>
-
-          <!-- Lyrics lines -->
-          <div v-if="active.type === 'lyrics' && parsedLines.length" class="lines-container" ref="linesContainer">
-            <div v-for="(line, idx) in parsedLines" :key="idx"
-              class="lyric-line-wrap"
-              :class="{ singing: isSinging && displayLineIdx === idx, past: isSinging && idx < displayLineIdx }"
-              @click="handleLineClick(idx)">
-              <div class="lyric-line">
-                <span class="line-num">{{ idx + 1 }}</span>
-                <span class="line-text">{{ line.text }}</span>
-                <span v-if="line.note" class="line-note">{{ tpNote(line.note) }}</span>
-                <span v-if="line.chord" class="line-chord">{{ tpChord(line.chord) }}</span>
-                <span v-if="line.direction" class="line-dir">{{ line.direction }}</span>
-              </div>
-              <!-- Hold bar -->
-              <div v-if="isSinging && displayLineIdx === idx" class="hold-bar"
-                :style="{ animationDuration: getLineDuration(line.text) + 's' }"></div>
-            </div>
-          </div>
-
-          <!-- Chorus -->
-          <div v-if="active.type === 'lyrics' && active.chorus" class="chorus-section">
-            <h4 class="chorus-label">Chorus</h4>
-            <div v-for="(ch, ci) in active.chorusAnnotations || []" :key="ci" class="lyric-line chorus-line">
-              <span class="line-text">{{ ch.line }}</span>
-              <span v-if="ch.chord" class="line-chord">{{ tpChord(ch.chord) }}</span>
-            </div>
-            <pre v-if="!active.chorusAnnotations?.length" class="chorus-text">{{ active.chorus }}</pre>
-          </div>
-
-          <!-- Poetry -->
-          <div v-if="active.type === 'poetry'" class="poem-section">
-            <div v-for="(line, idx) in poemLines" :key="idx" class="poem-line">{{ line }}</div>
-            <div v-if="active.mood" class="mood-box"><strong>Reading guidance:</strong> {{ active.mood }}</div>
-            <div v-if="active.devices?.length" class="devices-section">
-              <h4>Literary Devices</h4>
-              <div v-for="(d, di) in active.devices" :key="di" class="device-card">
-                <span class="device-name">{{ d.device }}</span>
-                <span class="device-example">"{{ d.example }}"</span>
-                <span class="device-explain">{{ d.explanation }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Image -->
-          <div v-if="active.type === 'image'" class="image-section">
-            <div class="image-prompt">{{ active.prompt }}</div>
-            <img :src="active.imageUrl" class="generated-image" alt="AI Generated" />
-          </div>
-
-          <!-- Rhyme -->
-          <div v-if="active.type === 'rhyme'" class="rhyme-section">
-            <div class="rhyme-prompt">Word: {{ active.prompt }}</div>
-            <div v-if="active.rhymes?.length" class="rhyme-group">
-              <h4 class="rhyme-group-label">Perfect Rhymes</h4>
-              <div class="rhyme-chips">
-                <span v-for="r in active.rhymes" :key="r" class="rhyme-chip">{{ r }}</span>
-              </div>
-            </div>
-            <div v-if="active.multiSyllable?.length" class="rhyme-group">
-              <h4 class="rhyme-group-label">Multi-Syllable</h4>
-              <div class="rhyme-chips">
-                <span v-for="r in active.multiSyllable" :key="r" class="rhyme-chip multi">{{ r }}</span>
-              </div>
-            </div>
-            <div v-if="active.slantRhymes?.length" class="rhyme-group">
-              <h4 class="rhyme-group-label">Slant Rhymes</h4>
-              <div class="rhyme-chips">
-                <span v-for="r in active.slantRhymes" :key="r" class="rhyme-chip slant">{{ r }}</span>
-              </div>
-            </div>
-            <div v-if="active.phrases?.length" class="rhyme-group">
-              <h4 class="rhyme-group-label">Example Phrases</h4>
-              <div v-for="(p, pi) in active.phrases" :key="pi" class="phrase-line">{{ p }}</div>
-            </div>
-          </div>
-
-        </div>
-      </main>
-    </div>
-    </template>
 
     <!-- Fixed bottom player bar -->
     <div v-if="isSinging" class="player-bar">
       <div class="pb-progress" :style="{ width: singProgress + '%' }"></div>
       <div class="pb-inner">
         <div class="pb-info">
-          <span class="pb-title">{{ active?.title || 'Untitled' }}</span>
+          <span class="pb-title">{{ activeItem?.title || 'Untitled' }}</span>
           <span class="pb-line">{{ currentSingLine }}</span>
         </div>
         <div class="pb-controls">
@@ -300,9 +347,12 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { Preferences } from "@capacitor/preferences";
 import { useNoteTone } from "./composables/useNoteTone.js";
+import { initDB } from "./services/database.js";
+import * as content from "./services/contentService.js";
+import { syncAll } from "./services/syncService.js";
 
 const {
   singAllLines, pauseSinging, resumeSinging, stopSinging, jumpToLine,
@@ -311,8 +361,6 @@ const {
 } = useNoteTone();
 
 // ── Auth ──
-// Native (Capacitor) builds always use the real backend.
-// Only a desktop browser at localhost uses the dev server.
 const isNative = !!(window.Capacitor?.isNativePlatform?.());
 const isLocalDev = !isNative && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
 const API_URL = isLocalDev ? "http://localhost:5000" : "https://lyrics-api.procreatorhub.com";
@@ -322,10 +370,8 @@ const showAuth = ref(null);
 const authForm = ref({ username: "", email: "", password: "" });
 const authError = ref("");
 const authLoading = ref(false);
-const isAdmin = computed(() => !!user.value?.isAdmin);
-const activeTab = ref('ai');
+const activeTab = ref('library');
 
-// Load saved token from native storage (survives app updates/reinstalls)
 const initAuth = async () => {
   const { value } = await Preferences.get({ key: "lp_token" });
   if (value) {
@@ -346,16 +392,15 @@ const checkAuth = async () => {
       token.value = "";
       await Preferences.remove({ key: "lp_token" });
     }
-  } catch { /* offline — keep token, user stays logged in */ }
+  } catch { /* offline */ }
 };
-initAuth();
 
 const handleAuth = async () => {
   authError.value = "";
   authLoading.value = true;
   const endpoint = showAuth.value === "login" ? "/login" : "/signup";
   const body = showAuth.value === "login"
-    ? { email: authForm.value.email, password: authForm.value.password }
+    ? { login: authForm.value.email, password: authForm.value.password }
     : { username: authForm.value.username, email: authForm.value.email, password: authForm.value.password };
   try {
     let res;
@@ -366,20 +411,17 @@ const handleAuth = async () => {
         body: JSON.stringify(body)
       });
     } catch {
-      throw new Error("Can't reach server — check your connection");
+      throw new Error("Can't reach server");
     }
     let data;
-    try {
-      data = await res.json();
-    } catch {
-      throw new Error(`Server error (${res.status})`);
-    }
+    try { data = await res.json(); } catch { throw new Error(`Server error (${res.status})`); }
     if (!res.ok) throw new Error(data.message || "Auth failed");
     token.value = data.token;
     await Preferences.set({ key: "lp_token", value: data.token });
     user.value = data;
     showAuth.value = null;
     authForm.value = { username: "", email: "", password: "" };
+    loadData();
   } catch (e) {
     authError.value = e.message;
   } finally {
@@ -393,140 +435,153 @@ const logout = async () => {
   await Preferences.remove({ key: "lp_token" });
 };
 
-// ── Playlist (persisted to localStorage) ──
-const loadSaved = () => {
-  try { return JSON.parse(localStorage.getItem("lp_playlist")) || []; } catch { return []; }
-};
-const playlist = ref(loadSaved());
-const activeIdx = ref(0);
-watch(playlist, (val) => {
-  try { localStorage.setItem("lp_playlist", JSON.stringify(val)); } catch { /* quota */ }
-}, { deep: true });
-const active = computed(() => playlist.value[activeIdx.value] || null);
-const dragOver = ref(false);
-const linesContainer = ref(null);
+// ── Data ──
+const generations = ref([]);
+const localPosts = ref([]);
+const localPlaylists = ref([]);
+const counts = ref({ generations: 0, posts: 0, playlists: 0 });
+const activeItem = ref(null);
+const activePlaylist = ref(null);
+const libraryFilter = ref('');
+const newPlaylistName = ref('');
+const showAddToPlaylist = ref(null);
 
-const transposeSemitones = ref(0);
-const vol = ref(volume.value);
-const muted = ref(false);
-let premuteVol = 1;
+const filteredGenerations = computed(() => {
+  if (!libraryFilter.value) return generations.value;
+  return generations.value.filter(g => g.tool === libraryFilter.value);
+});
 
-const toggleMute = () => {
-  if (muted.value) {
-    vol.value = premuteVol;
-    setVolume(premuteVol);
-    muted.value = false;
-  } else {
-    premuteVol = vol.value;
-    vol.value = 0;
-    setVolume(0);
-    muted.value = true;
+const toolIcon = (tool) => {
+  switch (tool) {
+    case 'lyrics': return '&#9835;';
+    case 'poetry': return '&#9998;';
+    case 'image': return '&#128247;';
+    case 'rhyme': return '&#128172;';
+    default: return '&#9733;';
   }
 };
 
-const setActive = (i) => {
+const loadData = async () => {
+  try {
+    await initDB();
+    generations.value = await content.getAllGenerations();
+    // Resolve local image URLs
+    for (const gen of generations.value) {
+      if (gen.imageLocalPath) {
+        gen._localUrl = await content.getLocalImageUrl(gen.imageLocalPath);
+      }
+    }
+    localPosts.value = await content.getAllPosts();
+    for (const post of localPosts.value) {
+      if (post.imageLocalPath) {
+        post._localUrl = await content.getLocalImageUrl(post.imageLocalPath);
+      }
+    }
+    localPlaylists.value = await content.getAllPlaylists();
+    counts.value = await content.getCounts();
+  } catch (e) {
+    console.error('Failed to load data:', e);
+  }
+};
+
+const openItem = (item) => {
   stopSinging();
-  activeIdx.value = i;
+  activeItem.value = { ...item };
   transposeSemitones.value = 0;
 };
 
-const removeItem = (i) => {
-  stopSinging();
-  playlist.value.splice(i, 1);
-  if (activeIdx.value >= playlist.value.length) activeIdx.value = Math.max(0, playlist.value.length - 1);
+const openPlaylist = (pl) => {
+  activePlaylist.value = pl;
 };
 
-// ── File handling ──
-const loadFiles = async (files) => {
-  for (const f of files) {
-    if (!f.name.endsWith(".json")) continue;
-    try {
-      const text = await f.text();
-      const data = JSON.parse(text);
-      playlist.value.push(data);
-    } catch { /* skip invalid */ }
+const handleRemoveGeneration = async (id) => {
+  await content.removeGeneration(id);
+  await loadData();
+};
+
+const handleRemovePost = async (id) => {
+  await content.removePost(id);
+  await loadData();
+};
+
+const handleCreatePlaylist = async () => {
+  if (!newPlaylistName.value.trim()) return;
+  await content.createPlaylist(newPlaylistName.value.trim());
+  newPlaylistName.value = '';
+  await loadData();
+};
+
+const handleRemovePlaylist = async (id) => {
+  await content.removePlaylist(id);
+  activePlaylist.value = null;
+  await loadData();
+};
+
+const handleAddToPlaylist = async (playlistId) => {
+  if (!showAddToPlaylist.value) return;
+  await content.addToPlaylist(playlistId, showAddToPlaylist.value.id);
+  showAddToPlaylist.value = null;
+  await loadData();
+};
+
+const handleCreateAndAdd = async () => {
+  if (!newPlaylistName.value.trim() || !showAddToPlaylist.value) return;
+  const plId = await content.createPlaylist(newPlaylistName.value.trim());
+  await content.addToPlaylist(plId, showAddToPlaylist.value.id);
+  newPlaylistName.value = '';
+  showAddToPlaylist.value = null;
+  await loadData();
+};
+
+const handleRemoveFromPlaylist = async (itemId) => {
+  await content.removeFromPlaylist(itemId);
+  await loadData();
+  // Refresh active playlist
+  if (activePlaylist.value) {
+    activePlaylist.value = localPlaylists.value.find(p => p.id === activePlaylist.value.id) || null;
   }
-  dragOver.value = false;
-  if (playlist.value.length && activeIdx.value === 0) activeIdx.value = 0;
 };
 
-const handleDrop = (e) => { loadFiles(e.dataTransfer.files); };
-const handleFileInput = (e) => { loadFiles(e.target.files); e.target.value = ""; };
+// ── Sync ──
+const syncing = ref(false);
+const syncStatus = ref('');
+const syncError = ref('');
+const syncResult = ref('');
+const lastSyncTime = ref('');
 
-// ── Generation → playlist item converter ──
-const generationToPlaylistItem = (g) => {
-  const m = g.metadata || {};
-  const item = { type: g.tool, generationId: g._id };
-  switch (g.tool) {
-    case "lyrics":
-      item.title = m.key ? `${m.key} | ${m.bpm || ""}bpm` : "Song";
-      item.lyrics = g.result;
-      item.lineAnnotations = m.lineAnnotations || [];
-      item.key = m.key; item.bpm = m.bpm;
-      item.chords = m.chords; item.chorusChords = m.chorusChords;
-      item.vocalRange = m.vocalRange; item.rhythm = m.rhythm;
-      break;
-    case "poetry":
-      item.title = m.title || "Poem";
-      item.poem = g.result;
-      item.style = m.style; item.theme = m.theme;
-      item.mood = m.mood; item.devices = m.devices || [];
-      break;
-    case "image":
-      item.title = g.prompt?.slice(0, 40) || "Image";
-      item.imageUrl = API_URL + g.result;
-      item.prompt = g.prompt;
-      break;
-    case "rhyme":
-      item.title = g.prompt?.slice(0, 40) || "Rhyme";
-      item.prompt = g.prompt;
-      item.rhymes = m.rhymes || []; item.multiSyllable = m.multiSyllable || [];
-      item.slantRhymes = m.slantRhymes || []; item.phrases = m.phrases || [];
-      break;
-  }
-  return item;
+const loadLastSync = async () => {
+  const { value } = await Preferences.get({ key: "ch_last_sync" });
+  if (value) lastSyncTime.value = new Date(value).toLocaleString();
 };
 
-// ── Import from account ──
-const importingAccount = ref(false);
-const importError = ref("");
-
-const importFromAccount = async () => {
+const handleSync = async () => {
   if (!token.value) return;
-  importingAccount.value = true;
-  importError.value = "";
+  syncing.value = true;
+  syncError.value = '';
+  syncResult.value = '';
+  syncStatus.value = 'Starting sync...';
   try {
-    let page = 1;
-    let added = 0;
-    let skipped = 0;
-    const existingIds = new Set(playlist.value.map(p => p.generationId).filter(Boolean));
-    while (true) {
-      const res = await fetch(API_URL + "/api/ai/history?page=" + page, {
-        headers: { Authorization: "Bearer " + token.value }
-      });
-      if (!res.ok) throw new Error("Failed to load history");
-      const data = await res.json();
-      for (const g of data.generations) {
-        if (!["lyrics", "poetry", "image", "rhyme"].includes(g.tool)) continue;
-        if (existingIds.has(g._id)) { skipped++; continue; }
-        playlist.value.push(generationToPlaylistItem(g));
-        existingIds.add(g._id);
-        added++;
+    const results = await syncAll(token.value, (p) => {
+      if (p.phase === 'generations') {
+        syncStatus.value = `Syncing generations... ${p.synced || 0}`;
+      } else if (p.phase === 'posts') {
+        syncStatus.value = `Syncing posts... ${p.synced || 0}`;
       }
-      if (page >= data.pages) break;
-      page++;
-    }
-    if (added === 0) {
-      importError.value = skipped > 0 ? `All ${skipped} items already imported` : "No AI generations found in your history";
-    }
+    });
+    const now = new Date().toISOString();
+    await Preferences.set({ key: "ch_last_sync", value: now });
+    lastSyncTime.value = new Date(now).toLocaleString();
+    syncResult.value = `Synced ${results.generations} generations, ${results.posts} posts`;
+    await loadData();
   } catch (e) {
-    importError.value = e.message;
+    syncError.value = e.message;
   } finally {
-    importingAccount.value = false;
+    syncing.value = false;
+    syncStatus.value = '';
   }
 };
 
-// ── Spotify playlists ──
+// ── Spotify ──
 const spotifyPlaylists = ref([]);
 const spotifyTracks = ref([]);
 const activeSpotifyPlaylist = ref(null);
@@ -559,7 +614,7 @@ const fetchSpotifyTracks = async (playlistId) => {
   } catch { /* offline */ }
 };
 
-// ── YouTube playlists ──
+// ── YouTube ──
 const youtubePlaylists = ref([]);
 const youtubeTracks = ref([]);
 const activeYoutubePlaylist = ref(null);
@@ -594,87 +649,62 @@ const fetchYoutubeTracks = async (playlistId) => {
   } catch { /* offline */ }
 };
 
-// ── Phone inbox ──
-const phoneInbox = ref([]);
-const loadingInbox = ref(false);
+// ── Viewer logic ──
+const transposeSemitones = ref(0);
+const vol = ref(volume.value);
+const muted = ref(false);
+let premuteVol = 1;
+const linesContainer = ref(null);
 
-const fetchPhoneInbox = async () => {
-  if (!token.value) return;
-  loadingInbox.value = true;
-  try {
-    const res = await fetch(API_URL + "/api/phone-queue", {
-      headers: { Authorization: "Bearer " + token.value }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      phoneInbox.value = data.items || [];
-    }
-  } catch { /* offline */ }
-  finally { loadingInbox.value = false; }
+const toggleMute = () => {
+  if (muted.value) { vol.value = premuteVol; setVolume(premuteVol); muted.value = false; }
+  else { premuteVol = vol.value; vol.value = 0; setVolume(0); muted.value = true; }
 };
 
-const importInboxItem = async (queueItem) => {
-  const g = queueItem.generation;
-  if (!g) return;
-  playlist.value.push(generationToPlaylistItem(g));
-  try {
-    await fetch(API_URL + "/api/phone-queue/" + queueItem._id, {
-      method: "DELETE",
-      headers: { Authorization: "Bearer " + token.value }
-    });
-  } catch { /* imported even if delete fails */ }
-  phoneInbox.value = phoneInbox.value.filter(i => i._id !== queueItem._id);
-  activeTab.value = "ai";
-};
+const activeItemImageSrc = computed(() => {
+  if (!activeItem.value) return '';
+  if (activeItem.value._localUrl) return activeItem.value._localUrl;
+  if (activeItem.value.imageUrl) return activeItem.value.imageUrl;
+  // Fallback: construct from serverId
+  if (activeItem.value.serverId) return `${API_URL}/api/ai/image/${activeItem.value.serverId}`;
+  return '';
+});
 
-const importAllInbox = async () => {
-  for (const item of [...phoneInbox.value]) {
-    await importInboxItem(item);
-  }
-};
-
-// ── Lyrics parsing ──
+// Lyrics parsing
 const parsedLines = computed(() => {
-  if (!active.value || active.value.type === "poetry") return [];
-  const annotations = active.value.lineAnnotations || [];
+  if (!activeItem.value || activeItem.value.tool !== 'lyrics') return [];
+  const meta = activeItem.value.metadata || {};
+  const annotations = meta.lineAnnotations || [];
   const map = new Map();
   for (const a of annotations) {
     if (a.line) map.set(a.line.trim().toLowerCase(), a);
   }
-  const lyricsText = active.value.lyrics || active.value.poem || "";
-  const rawLines = lyricsText.split("\n");
-  return rawLines.map((raw) => {
+  const lyricsText = activeItem.value.result || '';
+  return lyricsText.split("\n").map((raw) => {
     const text = raw.trim();
     const a = map.get(text.toLowerCase()) || null;
-    return {
-      text: raw,
-      note: a?.note || "",
-      chord: a?.chord || "",
-      direction: a?.direction || ""
-    };
+    return { text: raw, note: a?.note || "", chord: a?.chord || "", direction: a?.direction || "" };
   });
 });
 
 const poemLines = computed(() => {
-  if (!active.value) return [];
-  return (active.value.poem || "").split("\n");
+  if (!activeItem.value) return [];
+  return (activeItem.value.result || '').split("\n");
 });
 
 const displayKey = computed(() => {
-  if (!active.value?.key) return "";
-  return transposeKey(active.value.key, transposeSemitones.value);
+  if (!activeItem.value?.metadata?.key) return "";
+  return transposeKey(activeItem.value.metadata.key, transposeSemitones.value);
 });
 
 const tpNote = (n) => n ? transposeNote(n, transposeSemitones.value) : "";
 const tpChord = (c) => c ? transposeChord(c, transposeSemitones.value) : "";
 
-// ── Singing ──
-// Build singable lines (lines with notes) and a map from sing index → display index
+// Singing
 const singableLines = computed(() => {
   const lines = [];
   const indexMap = [];
-  // Default note from the song's key (e.g. "A minor" → "A4"), fallback to C4
-  const keyMatch = active.value?.key?.match(/^([A-Ga-g][#b]?)/);
+  const keyMatch = activeItem.value?.metadata?.key?.match(/^([A-Ga-g][#b]?)/);
   const defaultNote = keyMatch ? keyMatch[1] + "4" : "C4";
   parsedLines.value.forEach((line, i) => {
     if (line.text.trim()) {
@@ -692,12 +722,10 @@ const startSinging = () => {
 
 const handleLineClick = (idx) => {
   if (!isSinging.value) return;
-  // Map display index to sing index
   const singIdx = singableLines.value.indexMap.indexOf(idx);
   if (singIdx >= 0) jumpToLine(singIdx);
 };
 
-// Player bar info
 const singProgress = computed(() => {
   if (currentLineIdx.value < 0 || !singableLines.value.lines.length) return 0;
   return ((currentLineIdx.value + 1) / singableLines.value.lines.length) * 100;
@@ -706,19 +734,32 @@ const currentSingLine = computed(() => {
   if (currentLineIdx.value < 0) return "";
   return singableLines.value.lines[currentLineIdx.value]?.text || "";
 });
-
-// Map current sing index back to display index for highlighting + scrolling
 const displayLineIdx = computed(() => {
   if (currentLineIdx.value < 0) return -1;
   return singableLines.value.indexMap[currentLineIdx.value] ?? -1;
 });
 
-// Auto-scroll during singing
 watch(displayLineIdx, async (idx) => {
   if (idx < 0 || !linesContainer.value) return;
   await nextTick();
   const el = linesContainer.value.children[idx];
   if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+// ── Init ──
+onMounted(async () => {
+  await initAuth();
+  if (user.value) {
+    await loadData();
+    await loadLastSync();
+  }
+});
+
+watch(user, async (u) => {
+  if (u) {
+    await loadData();
+    await loadLastSync();
+  }
 });
 </script>
 
@@ -777,70 +818,120 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
 .btn.danger:hover { background: #dc2626; color: #fff; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Upload zone */
-.upload-zone {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  padding: 40px; position: relative;
+/* Admin gate / welcome */
+.admin-gate {
+  flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px;
 }
-.upload-inner {
-  border: 2px dashed #333; border-radius: 16px; padding: 60px 40px;
-  text-align: center; width: 100%; max-width: 500px; position: relative;
-  transition: border-color 0.2s;
+.admin-gate-inner {
+  text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px;
 }
-.upload-zone.hover .upload-inner { border-color: #6b21a8; }
-.upload-icon { font-size: 3rem; color: #6b21a8; margin-bottom: 12px; }
-.upload-title { font-size: 1.1rem; font-weight: 700; color: #e5e5e5; }
-.upload-sub { font-size: 0.85rem; color: #666; margin-top: 4px; }
-.import-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; justify-content: center; position: relative; z-index: 2; }
-.import-btn {
-  display: inline-block; padding: 12px 28px;
-  background: #6b21a8; color: #fff; border-radius: 10px;
-  font-weight: 700; font-size: 0.95rem; cursor: pointer;
-  border: none; transition: background 0.15s;
-}
-.import-btn:hover { background: #7c3aed; }
-.import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.account-btn { background: #1a1a1a; border: 2px solid #6b21a8; color: #c4b5fd; }
-.account-btn:hover { background: #6b21a8; color: #fff; }
-.upload-hint { font-size: 0.78rem; color: #555; margin-top: 10px; }
-.account-import { font-size: 0.65rem; font-weight: 800; }
-.file-input {
-  position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
-}
+.admin-gate h2 { color: #c4b5fd; font-size: 1.3rem; }
+.admin-gate p { color: #888; font-size: 0.9rem; }
+.admin-icon { font-size: 2.5rem; }
 
-/* Player layout */
-.player-layout { flex: 1; display: flex; overflow: hidden; }
+/* Tab bar */
+.tab-bar {
+  display: flex; gap: 0; border-bottom: 1px solid #222; background: #141414;
+  padding: 0 16px; overflow-x: auto;
+}
+.tab-btn {
+  padding: 10px 18px; background: none; border: none; border-bottom: 2px solid transparent;
+  color: #888; font-size: 0.85rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.tab-btn.active { color: #c4b5fd; border-bottom-color: #6b21a8; }
+.tab-btn:hover { color: #e5e5e5; }
 
-/* Sidebar */
-.sidebar {
-  width: 260px; min-width: 260px; background: #141414;
-  border-right: 1px solid #222; overflow-y: auto;
+/* Platform sections */
+.platform-section { flex: 1; overflow-y: auto; padding: 20px; }
+.loading-msg { color: #888; text-align: center; padding: 40px; }
+.empty-msg { color: #666; text-align: center; font-size: 0.9rem; }
+
+/* Filter chips */
+.filter-chips { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.chip {
+  padding: 6px 16px; border-radius: 20px; border: 1px solid #333;
+  background: transparent; color: #888; font-size: 0.8rem; font-weight: 600; cursor: pointer;
 }
-.sidebar-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 16px; border-bottom: 1px solid #222;
+.chip.active { background: #6b21a8; color: #fff; border-color: #6b21a8; }
+.chip:hover { border-color: #6b21a8; color: #c4b5fd; }
+
+/* Item grid (library, posts) */
+.item-grid { display: flex; flex-direction: column; gap: 6px; }
+.item-card {
+  display: flex; align-items: center; gap: 12px; padding: 12px;
+  background: #1a1a1a; border-radius: 10px; cursor: pointer; border: 1px solid #222;
+  transition: background 0.15s;
 }
-.sidebar-header h3 { font-size: 0.95rem; color: #c4b5fd; }
-.add-more-btn {
-  width: 28px; height: 28px; border-radius: 6px; background: #6b21a8;
-  color: #fff; font-size: 1.2rem; display: flex; align-items: center;
-  justify-content: center; cursor: pointer;
+.item-card:hover { background: #222; }
+.item-thumb { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; }
+.item-icon {
+  width: 48px; height: 48px; border-radius: 6px; display: flex;
+  align-items: center; justify-content: center; font-size: 1.4rem; flex-shrink: 0;
 }
-.pl-item {
-  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
-  cursor: pointer; border-bottom: 1px solid #1a1a1a; transition: background 0.15s;
-}
-.pl-item:hover { background: #1a1a1a; }
-.pl-item.active { background: #1f1535; border-left: 3px solid #6b21a8; }
-.pl-title { flex: 1; font-size: 0.85rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pl-type { font-size: 0.7rem; color: #666; text-transform: uppercase; }
+.icon-lyrics { background: #2d1b69; color: #c4b5fd; }
+.icon-poetry { background: #1e3a5f; color: #93c5fd; }
+.icon-image { background: #14532d; color: #86efac; }
+.icon-rhyme { background: #78350f; color: #fbbf24; }
+.item-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.item-title { font-size: 0.88rem; font-weight: 600; color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-type { font-size: 0.7rem; color: #666; text-transform: uppercase; }
 .pl-remove {
   background: none; border: none; color: #555; font-size: 1.1rem;
-  cursor: pointer; padding: 0 4px;
+  cursor: pointer; padding: 0 4px; flex-shrink: 0;
 }
 .pl-remove:hover { color: #ef4444; }
 
-/* Content */
+/* Playlist grid */
+.playlist-grid { display: flex; flex-direction: column; gap: 8px; }
+.playlist-card {
+  display: flex; align-items: center; gap: 12px; padding: 12px;
+  background: #1a1a1a; border-radius: 10px; cursor: pointer; border: 1px solid #222;
+  transition: background 0.15s;
+}
+.playlist-card:hover { background: #222; }
+.playlist-thumb { width: 56px; height: 56px; border-radius: 6px; object-fit: cover; }
+.playlist-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.playlist-name { font-size: 0.9rem; font-weight: 700; color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.playlist-count { font-size: 0.75rem; color: #888; }
+.pl-icon { width: 48px; height: 48px; border-radius: 6px; background: #2d1b69; color: #c4b5fd; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; flex-shrink: 0; }
+
+/* New playlist form */
+.new-pl-form { display: flex; gap: 8px; margin-bottom: 12px; }
+.new-pl-form .input { flex: 1; }
+.top-form { margin-bottom: 16px; }
+
+/* Playlist detail */
+.detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.detail-header h3 { font-size: 1.1rem; color: #c4b5fd; }
+
+/* Add to playlist modal */
+.playlist-pick-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; max-height: 200px; overflow-y: auto; }
+.playlist-pick-item {
+  padding: 10px 14px; background: #0f0f0f; border-radius: 6px; cursor: pointer;
+  font-size: 0.88rem; color: #e5e5e5; border: 1px solid #222;
+}
+.playlist-pick-item:hover { background: #222; border-color: #6b21a8; }
+.pick-count { color: #666; font-size: 0.75rem; }
+
+/* Sync section */
+.sync-section { display: flex; justify-content: center; padding-top: 40px; }
+.sync-card {
+  background: #1a1a1a; border: 1px solid #222; border-radius: 12px;
+  padding: 28px; text-align: center; max-width: 400px; width: 100%;
+}
+.sync-card h3 { color: #c4b5fd; font-size: 1.1rem; margin-bottom: 8px; }
+.sync-desc { color: #888; font-size: 0.85rem; margin-bottom: 16px; }
+.sync-stats { display: flex; gap: 12px; justify-content: center; margin-bottom: 12px; }
+.sync-stat { font-size: 0.8rem; color: #a78bfa; font-weight: 600; }
+.sync-last { font-size: 0.75rem; color: #555; margin-bottom: 12px; }
+.sync-result { font-size: 0.85rem; color: #22c55e; margin-top: 8px; }
+
+/* Viewer */
+.viewer-header {
+  display: flex; align-items: center; gap: 10px; padding: 12px 20px;
+  border-bottom: 1px solid #222; background: #141414;
+}
+.player-layout { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .content { flex: 1; overflow-y: auto; padding: 24px; }
 .song-title { font-size: 1.5rem; font-weight: 800; color: #c4b5fd; margin-bottom: 12px; }
 
@@ -877,7 +968,7 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
 .controls { display: flex; gap: 10px; margin-bottom: 16px; }
 
 /* Lyrics lines */
-.lines-container { display: flex; flex-direction: column; gap: 2px; }
+.lines-container { display: flex; flex-direction: column; gap: 2px; padding-bottom: 70px; }
 .lyric-line-wrap {
   position: relative; border-radius: 6px; transition: background 0.2s; cursor: pointer;
 }
@@ -900,15 +991,12 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
   font-size: 0.7rem; font-weight: 800; color: #f59e0b;
   background: #78350f33; padding: 2px 8px; border-radius: 10px;
 }
-.line-dir {
-  font-size: 0.65rem; color: #888; font-style: italic;
-}
+.line-dir { font-size: 0.65rem; color: #888; font-style: italic; }
 
 /* Hold bar */
 .hold-bar {
   height: 3px; background: #22c55e; border-radius: 0 0 6px 6px;
-  margin: 0 10px; animation: hold-fill linear forwards;
-  width: 0;
+  margin: 0 10px; animation: hold-fill linear forwards; width: 0;
 }
 @keyframes hold-fill { from { width: 0; } to { width: 100%; } }
 
@@ -918,7 +1006,6 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
   border-radius: 8px; border-left: 4px solid #f59e0b;
 }
 .chorus-label { color: #f59e0b; font-size: 0.85rem; margin-bottom: 8px; }
-.chorus-line { padding: 4px 0; }
 .chorus-text { color: #ccc; font-family: Georgia, serif; white-space: pre-wrap; }
 
 /* Poetry */
@@ -942,6 +1029,45 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
 .device-name { font-weight: 800; font-size: 0.82rem; color: #a78bfa; text-transform: uppercase; }
 .device-example { font-style: italic; font-size: 0.88rem; color: #e5e5e5; font-family: Georgia, serif; }
 .device-explain { font-size: 0.8rem; color: #888; }
+
+/* Image section */
+.image-section { text-align: center; }
+.image-prompt { font-size: 0.85rem; color: #888; margin-bottom: 16px; font-style: italic; }
+.generated-image { max-width: 100%; border-radius: 12px; border: 1px solid #333; }
+
+/* Rhyme section */
+.rhyme-section { display: flex; flex-direction: column; gap: 16px; }
+.rhyme-prompt { font-size: 1rem; font-weight: 700; color: #c4b5fd; }
+.rhyme-group { display: flex; flex-direction: column; gap: 8px; }
+.rhyme-group-label { font-size: 0.85rem; font-weight: 800; color: #a78bfa; }
+.rhyme-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rhyme-chip {
+  padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
+  background: #2d1b69; color: #c4b5fd;
+}
+.rhyme-chip.multi { background: #14532d; color: #86efac; }
+.rhyme-chip.slant { background: #78350f; color: #fbbf24; }
+.phrase-line {
+  font-family: Georgia, serif; font-size: 0.9rem; color: #ccc;
+  padding: 4px 0; line-height: 1.7; font-style: italic;
+}
+
+/* Track list */
+.track-list-view { display: flex; flex-direction: column; gap: 6px; }
+.back-btn { align-self: flex-start; margin-bottom: 8px; }
+.track-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  background: #1a1a1a; border-radius: 8px; border: 1px solid #1f1f1f;
+}
+.track-thumb { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; }
+.track-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.track-name { font-size: 0.85rem; font-weight: 600; color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-artist { font-size: 0.75rem; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-link {
+  font-size: 0.75rem; font-weight: 700; color: #a78bfa; text-decoration: none;
+  padding: 4px 10px; border: 1px solid #6b21a8; border-radius: 6px; white-space: nowrap;
+}
+.track-link:hover { background: #6b21a8; color: #fff; }
 
 /* Fixed bottom player bar */
 .player-bar {
@@ -978,118 +1104,13 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
 .pb-btn.danger { border-color: #dc2626; color: #ef4444; }
 .pb-btn.danger:hover { background: #dc2626; color: #fff; }
 
-/* Add bottom padding when bar is visible so content isn't hidden behind it */
-.lines-container { padding-bottom: 70px; }
-
-/* Admin gate */
-.admin-gate {
-  flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px;
-}
-.admin-gate-inner {
-  text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px;
-}
-.admin-gate h2 { color: #c4b5fd; font-size: 1.3rem; }
-.admin-gate p { color: #888; font-size: 0.9rem; }
-.admin-icon { font-size: 2.5rem; }
-
-/* Tab bar */
-.tab-bar {
-  display: flex; gap: 0; border-bottom: 1px solid #222; background: #141414;
-  padding: 0 16px; overflow-x: auto;
-}
-.tab-btn {
-  padding: 10px 18px; background: none; border: none; border-bottom: 2px solid transparent;
-  color: #888; font-size: 0.85rem; font-weight: 700; cursor: pointer; white-space: nowrap;
-}
-.tab-btn.active { color: #c4b5fd; border-bottom-color: #6b21a8; }
-.tab-btn:hover { color: #e5e5e5; }
-
-/* Platform sections (Spotify, YouTube, Inbox) */
-.platform-section { flex: 1; overflow-y: auto; padding: 20px; }
-.loading-msg { color: #888; text-align: center; padding: 40px; }
-.empty-msg { color: #666; text-align: center; font-size: 0.9rem; }
-
-/* Playlist grid */
-.playlist-grid { display: flex; flex-direction: column; gap: 8px; }
-.playlist-card {
-  display: flex; align-items: center; gap: 12px; padding: 12px;
-  background: #1a1a1a; border-radius: 10px; cursor: pointer; border: 1px solid #222;
-  transition: background 0.15s;
-}
-.playlist-card:hover { background: #222; }
-.playlist-thumb { width: 56px; height: 56px; border-radius: 6px; object-fit: cover; }
-.playlist-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.playlist-name { font-size: 0.9rem; font-weight: 700; color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.playlist-count { font-size: 0.75rem; color: #888; }
-
-/* Track list */
-.track-list-view { display: flex; flex-direction: column; gap: 6px; }
-.back-btn { align-self: flex-start; margin-bottom: 8px; }
-.track-item {
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  background: #1a1a1a; border-radius: 8px; border: 1px solid #1f1f1f;
-}
-.track-thumb { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; }
-.track-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.track-name { font-size: 0.85rem; font-weight: 600; color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.track-artist { font-size: 0.75rem; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.track-link {
-  font-size: 0.75rem; font-weight: 700; color: #a78bfa; text-decoration: none;
-  padding: 4px 10px; border: 1px solid #6b21a8; border-radius: 6px; white-space: nowrap;
-}
-.track-link:hover { background: #6b21a8; color: #fff; }
-
-/* Inbox */
-.inbox-list { display: flex; flex-direction: column; gap: 8px; }
-.import-all-btn { align-self: flex-start; margin-bottom: 8px; font-size: 0.82rem; padding: 8px 16px; }
-.inbox-item {
-  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-  background: #1a1a1a; border-radius: 8px; border: 1px solid #222;
-}
-.inbox-type {
-  font-size: 0.7rem; font-weight: 800; text-transform: uppercase;
-  padding: 3px 8px; border-radius: 10px; background: #6b21a8; color: #fff;
-}
-.inbox-type.type-image { background: #14532d; }
-.inbox-type.type-rhyme { background: #78350f; }
-.inbox-type.type-poetry { background: #1e3a5f; }
-.inbox-prompt { flex: 1; font-size: 0.82rem; color: #ccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* Image section */
-.image-section { text-align: center; }
-.image-prompt { font-size: 0.85rem; color: #888; margin-bottom: 16px; font-style: italic; }
-.generated-image { max-width: 100%; border-radius: 12px; border: 1px solid #333; }
-
-/* Rhyme section */
-.rhyme-section { display: flex; flex-direction: column; gap: 16px; }
-.rhyme-prompt { font-size: 1rem; font-weight: 700; color: #c4b5fd; }
-.rhyme-group { display: flex; flex-direction: column; gap: 8px; }
-.rhyme-group-label { font-size: 0.85rem; font-weight: 800; color: #a78bfa; }
-.rhyme-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.rhyme-chip {
-  padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
-  background: #2d1b69; color: #c4b5fd;
-}
-.rhyme-chip.multi { background: #14532d; color: #86efac; }
-.rhyme-chip.slant { background: #78350f; color: #fbbf24; }
-.phrase-line {
-  font-family: Georgia, serif; font-size: 0.9rem; color: #ccc;
-  padding: 4px 0; line-height: 1.7; font-style: italic;
-}
-
-/* Sidebar type colors */
-.pl-type {
-  font-size: 0.7rem; color: #666; text-transform: uppercase;
-}
-
 /* Mobile */
 @media (max-width: 700px) {
-  .player-layout { flex-direction: column; }
-  .sidebar { width: 100%; min-width: unset; max-height: 180px; border-right: none; border-bottom: 1px solid #222; }
   .content { padding: 16px; padding-bottom: 80px; }
   .meta-row { gap: 6px; }
-  .tab-bar { padding: 0 8px; }
-  .tab-btn { padding: 10px 12px; font-size: 0.8rem; }
+  .tab-bar { padding: 0 4px; }
+  .tab-btn { padding: 10px 10px; font-size: 0.75rem; }
   .platform-section { padding: 14px; }
+  .sync-card { padding: 20px; }
 }
 </style>

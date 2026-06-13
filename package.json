@@ -4,16 +4,21 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "build:android": "vite build && npx cap sync android && cd android && gradlew assembleDebug",
+    "copy:wasm": "node -e \"require('fs').cpSync('node_modules/sql.js/dist/sql-wasm.wasm','public/assets/sql-wasm.wasm')\"",
+    "dev": "npm run copy:wasm && vite",
+    "build": "npm run copy:wasm && vite build",
+    "build:android": "npm run build && npx cap sync android && cd android && gradlew assembleDebug",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.0",
     "@capacitor/android": "^8.4.0",
     "@capacitor/cli": "^8.4.0",
     "@capacitor/core": "^8.4.0",
+    "@capacitor/filesystem": "^8.1.2",
     "@capacitor/preferences": "^8.0.1",
+    "jeep-sqlite": "^2.8.0",
+    "sql.js": "^1.11.0",
     "vue": "^3.5.34"
   },
   "devDependencies": {
