@@ -145,6 +145,10 @@
             <div class="image-section">
               <div class="image-prompt">{{ activeItem.prompt }}</div>
               <img :src="activeItemImageSrc" class="generated-image" alt="AI Generated" />
+              <button class="btn accent download-btn" @click="saveImageToGallery" :disabled="savingImage">
+                {{ savingImage ? 'Saving...' : 'Save to Gallery' }}
+              </button>
+              <p v-if="saveImageMsg" class="save-msg" :class="{ error: saveImageMsg.startsWith('Error') }">{{ saveImageMsg }}</p>
             </div>
           </template>
 
@@ -349,6 +353,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { Preferences } from "@capacitor/preferences";
+import { Filesystem, Directory } from "@capacitor/filesystem";
 import { useNoteTone } from "./composables/useNoteTone.js";
 import { initDB } from "./services/database.js";
 import * as content from "./services/contentService.js";
@@ -606,10 +611,13 @@ const fetchSpotifyTracks = async (playlistId) => {
   activeSpotifyPlaylist.value = playlistId;
   spotifyTracks.value = [];
   try {
-    const res = await fetch(API_URL + "/api/spotify/playlist/" + playlistId + "/tracks");
+    const res = await fetch(API_URL + "/api/spotify/playlist/" + playlistId + "/tracks", {
+      headers: { Authorization: "Bearer " + token.value }
+    });
     if (res.ok) {
       const data = await res.json();
-      spotifyTracks.value = data.items || [];
+      // Each item has a .track sub-object with the actual track data
+      spotifyTracks.value = (data.items || []).map(i => i.track).filter(Boolean);
     }
   } catch { /* offline */ }
 };
@@ -669,6 +677,44 @@ const activeItemImageSrc = computed(() => {
   if (activeItem.value.serverId) return `${API_URL}/api/ai/image/${activeItem.value.serverId}`;
   return '';
 });
+
+// ── Image download to gallery ──
+const savingImage = ref(false);
+const saveImageMsg = ref('');
+
+const saveImageToGallery = async () => {
+  if (!activeItem.value) return;
+  savingImage.value = true;
+  saveImageMsg.value = '';
+  try {
+    const src = activeItemImageSrc.value;
+    if (!src) throw new Error('No image source');
+    // Fetch the image as blob
+    const response = await fetch(src);
+    if (!response.ok) throw new Error('Failed to fetch image');
+    const blob = await response.blob();
+    const reader = new FileReader();
+    const base64 = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    const filename = `creator_hub_${Date.now()}.png`;
+    // Save to Pictures directory (visible in gallery)
+    await Filesystem.writeFile({
+      path: filename,
+      data: base64,
+      directory: Directory.Documents,
+      recursive: true
+    });
+    saveImageMsg.value = 'Saved to Documents!';
+  } catch (e) {
+    saveImageMsg.value = 'Error: ' + (e.message || 'Failed to save');
+  } finally {
+    savingImage.value = false;
+    setTimeout(() => { saveImageMsg.value = ''; }, 3000);
+  }
+};
 
 // Lyrics parsing
 const parsedLines = computed(() => {
@@ -1034,6 +1080,9 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
 .image-section { text-align: center; }
 .image-prompt { font-size: 0.85rem; color: #888; margin-bottom: 16px; font-style: italic; }
 .generated-image { max-width: 100%; border-radius: 12px; border: 1px solid #333; }
+.download-btn { margin-top: 12px; width: 100%; }
+.save-msg { text-align: center; margin-top: 8px; font-size: 0.85rem; color: #4caf50; }
+.save-msg.error { color: #ff5252; }
 
 /* Rhyme section */
 .rhyme-section { display: flex; flex-direction: column; gap: 16px; }
