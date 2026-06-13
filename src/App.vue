@@ -400,7 +400,7 @@ const handleAuth = async () => {
   authLoading.value = true;
   const endpoint = showAuth.value === "login" ? "/login" : "/signup";
   const body = showAuth.value === "login"
-    ? { login: authForm.value.email, password: authForm.value.password }
+    ? { email: authForm.value.email, password: authForm.value.password }
     : { username: authForm.value.username, email: authForm.value.email, password: authForm.value.password };
   try {
     let res;
