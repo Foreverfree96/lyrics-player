@@ -1,4 +1,4 @@
-import { saveGeneration, updateGenerationImage, savePost, updatePostImage, downloadImage } from './contentService.js';
+import { saveGeneration, updateGenerationImage, downloadImage } from './contentService.js';
 import { initDB } from './database.js';
 
 function getApiUrl() {
@@ -71,60 +71,15 @@ async function syncGenerations(token, onProgress) {
   return synced;
 }
 
-async function syncPosts(token, onProgress) {
-  const API = getApiUrl();
-  const existing = await getExistingServerIds('posts');
-
-  const res = await fetch(`${API}/api/posts/mine`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!res.ok) throw new Error('Failed to fetch posts');
-  const posts = await res.json();
-  let synced = 0;
-
-  for (const p of posts) {
-    if (existing.has(p._id)) { synced++; continue; }
-
-    const id = await savePost({
-      serverId: p._id,
-      title: p.title || '',
-      body: p.body || '',
-      mediaUrl: p.mediaUrl || '',
-      embedType: p.embedType || '',
-      imageUrl: p.imageUrl || '',
-      category: p.category || '',
-      likesCount: p.likes?.length || 0,
-      commentsCount: p.comments?.length || 0,
-      createdAt: p.createdAt
-    });
-
-    // Download post image if exists
-    if (p.imageUrl && id) {
-      const localPath = await downloadImage(p.imageUrl, `post_${p._id}.jpg`);
-      if (localPath) await updatePostImage(id, localPath);
-    }
-
-    synced++;
-    if (onProgress) onProgress({ synced, total: posts.length, type: 'posts' });
-  }
-
-  return synced;
-}
-
 async function syncAll(token, onProgress) {
-  const results = { generations: 0, posts: 0 };
+  const results = { generations: 0 };
 
   if (onProgress) onProgress({ phase: 'generations', synced: 0, total: 0 });
   results.generations = await syncGenerations(token, (p) => {
     if (onProgress) onProgress({ ...p, phase: 'generations' });
   });
 
-  if (onProgress) onProgress({ phase: 'posts', synced: 0, total: 0 });
-  results.posts = await syncPosts(token, (p) => {
-    if (onProgress) onProgress({ ...p, phase: 'posts' });
-  });
-
   return results;
 }
 
-export { syncGenerations, syncPosts, syncAll };
+export { syncGenerations, syncAll };

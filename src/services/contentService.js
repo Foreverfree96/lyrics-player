@@ -68,43 +68,6 @@ async function removeGeneration(id) {
   await db.run('DELETE FROM generations WHERE id = ?', [id]);
 }
 
-// ── Posts ──
-
-async function getAllPosts() {
-  const db = await initDB();
-  const res = await db.query('SELECT * FROM posts ORDER BY createdAt DESC');
-  return res.values || [];
-}
-
-async function savePost(post) {
-  const db = await initDB();
-  if (post.serverId) {
-    const existing = await db.query('SELECT id FROM posts WHERE serverId = ?', [post.serverId]);
-    if (existing.values?.length) return existing.values[0].id;
-  }
-  const id = post.id || uid();
-  await db.run(
-    `INSERT OR REPLACE INTO posts (id, serverId, title, body, mediaUrl, embedType, imageUrl, imageLocalPath, category, likesCount, commentsCount, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, post.serverId || null, post.title || '', post.body || '', post.mediaUrl || '', post.embedType || '', post.imageUrl || '', post.imageLocalPath || null, post.category || '', post.likesCount || 0, post.commentsCount || 0, post.createdAt || new Date().toISOString()]
-  );
-  return id;
-}
-
-async function updatePostImage(id, localPath) {
-  const db = await initDB();
-  await db.run('UPDATE posts SET imageLocalPath = ? WHERE id = ?', [localPath, id]);
-}
-
-async function removePost(id) {
-  const db = await initDB();
-  const res = await db.query('SELECT imageLocalPath FROM posts WHERE id = ?', [id]);
-  if (res.values?.[0]?.imageLocalPath) {
-    try { await Filesystem.deleteFile({ path: res.values[0].imageLocalPath, directory: Directory.Data }); } catch (_) {}
-  }
-  await db.run('DELETE FROM posts WHERE id = ?', [id]);
-}
-
 // ── Playlists ──
 
 async function getAllPlaylists() {
@@ -218,14 +181,12 @@ async function getLocalImageUrl(path) {
 async function getCounts() {
   const db = await initDB();
   const gens = (await db.query('SELECT COUNT(*) as cnt FROM generations')).values?.[0]?.cnt || 0;
-  const posts = (await db.query('SELECT COUNT(*) as cnt FROM posts')).values?.[0]?.cnt || 0;
   const pls = (await db.query('SELECT COUNT(*) as cnt FROM playlists')).values?.[0]?.cnt || 0;
-  return { generations: gens, posts, playlists: pls };
+  return { generations: gens, playlists: pls };
 }
 
 export {
   getAllGenerations, getGeneration, saveGeneration, updateGenerationImage, removeGeneration,
-  getAllPosts, savePost, updatePostImage, removePost,
   getAllPlaylists, createPlaylist, renamePlaylist, addToPlaylist, removeFromPlaylist, removePlaylist,
   downloadImage, getLocalImageUri, getLocalImageUrl,
   getCounts

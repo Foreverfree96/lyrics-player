@@ -53,10 +53,7 @@
     <!-- Tab bar -->
     <div v-if="user" class="tab-bar">
       <button :class="['tab-btn', { active: activeTab === 'library' }]" @click="activeTab = 'library'">Library</button>
-      <button :class="['tab-btn', { active: activeTab === 'posts' }]" @click="activeTab = 'posts'">Posts</button>
       <button :class="['tab-btn', { active: activeTab === 'playlists' }]" @click="activeTab = 'playlists'">Playlists</button>
-      <button :class="['tab-btn', { active: activeTab === 'spotify' }]" @click="activeTab = 'spotify'; fetchSpotifyPlaylists()">Spotify</button>
-      <button :class="['tab-btn', { active: activeTab === 'youtube' }]" @click="activeTab = 'youtube'; fetchYoutubePlaylists()">YouTube</button>
       <button :class="['tab-btn', { active: activeTab === 'sync' }]" @click="activeTab = 'sync'">Sync</button>
     </div>
 
@@ -207,21 +204,6 @@
       <p v-else class="empty-msg" style="padding:40px">No content yet. Go to Sync to pull from your account.</p>
     </div>
 
-    <!-- Posts tab -->
-    <div v-if="user && !activeItem && activeTab === 'posts'" class="platform-section">
-      <div v-if="localPosts.length" class="item-grid">
-        <div v-for="post in localPosts" :key="post.id" class="item-card post-card">
-          <img v-if="post.imageLocalPath || post.imageUrl" :src="post._localUrl || post.imageUrl" class="item-thumb" />
-          <div class="item-info">
-            <span class="item-title">{{ post.title || post.body?.slice(0, 50) || 'Untitled' }}</span>
-            <span class="item-type">{{ post.category || 'Post' }} &middot; {{ post.likesCount }} likes</span>
-          </div>
-          <button class="pl-remove" @click.stop="handleRemovePost(post.id)" title="Remove">&times;</button>
-        </div>
-      </div>
-      <p v-else class="empty-msg" style="padding:40px">No posts synced yet. Go to Sync to pull your posts.</p>
-    </div>
-
     <!-- Playlists tab -->
     <div v-if="user && !activeItem && activeTab === 'playlists'" class="platform-section">
       <form class="new-pl-form top-form" @submit.prevent="handleCreatePlaylist">
@@ -259,60 +241,6 @@
       </div>
     </div>
 
-    <!-- Spotify tab -->
-    <div v-if="user && !activeItem && activeTab === 'spotify'" class="platform-section">
-      <div v-if="loadingSpotify" class="loading-msg">Loading Spotify playlists...</div>
-      <div v-else-if="!activeSpotifyPlaylist" class="playlist-grid">
-        <div v-for="pl in spotifyPlaylists" :key="pl.id" class="playlist-card" @click="fetchSpotifyTracks(pl.id)">
-          <img v-if="pl.image" :src="pl.image" class="playlist-thumb" />
-          <div class="playlist-info">
-            <span class="playlist-name">{{ pl.name }}</span>
-            <span class="playlist-count">{{ pl.tracks }} tracks</span>
-          </div>
-        </div>
-        <p v-if="!spotifyPlaylists.length" class="empty-msg">No Spotify playlists found</p>
-      </div>
-      <div v-else class="track-list-view">
-        <button class="btn-sm back-btn" @click="activeSpotifyPlaylist = null; spotifyTracks = []">&larr; Back</button>
-        <div v-for="t in spotifyTracks" :key="t.id || t.uri" class="track-item">
-          <img v-if="t.album?.images?.[0]?.url" :src="t.album.images[0].url" class="track-thumb" />
-          <div class="track-info">
-            <span class="track-name">{{ t.name }}</span>
-            <span class="track-artist">{{ t.artists?.map(a => a.name).join(', ') }}</span>
-          </div>
-          <a :href="'https://open.spotify.com/track/' + (t.id || t.uri?.split(':').pop())" target="_blank" class="track-link">Open</a>
-        </div>
-        <p v-if="!spotifyTracks.length" class="empty-msg">No tracks found</p>
-      </div>
-    </div>
-
-    <!-- YouTube tab -->
-    <div v-if="user && !activeItem && activeTab === 'youtube'" class="platform-section">
-      <div v-if="loadingYoutube" class="loading-msg">Loading YouTube playlists...</div>
-      <div v-else-if="!activeYoutubePlaylist" class="playlist-grid">
-        <div v-for="pl in youtubePlaylists" :key="pl.id" class="playlist-card" @click="fetchYoutubeTracks(pl.id)">
-          <img v-if="pl.image" :src="pl.image" class="playlist-thumb" />
-          <div class="playlist-info">
-            <span class="playlist-name">{{ pl.name }}</span>
-            <span class="playlist-count">{{ pl.tracks }} tracks</span>
-          </div>
-        </div>
-        <p v-if="!youtubePlaylists.length" class="empty-msg">No YouTube playlists found</p>
-      </div>
-      <div v-else class="track-list-view">
-        <button class="btn-sm back-btn" @click="activeYoutubePlaylist = null; youtubeTracks = []">&larr; Back</button>
-        <div v-for="t in youtubeTracks" :key="t.videoId || t.id" class="track-item">
-          <img v-if="t.thumbnail" :src="t.thumbnail" class="track-thumb" />
-          <div class="track-info">
-            <span class="track-name">{{ t.title || t.name }}</span>
-            <span class="track-artist">{{ t.channelTitle || t.artist || '' }}</span>
-          </div>
-          <a :href="'https://youtube.com/watch?v=' + (t.videoId || t.id)" target="_blank" class="track-link">Open</a>
-        </div>
-        <p v-if="!youtubeTracks.length" class="empty-msg">No tracks found</p>
-      </div>
-    </div>
-
     <!-- Sync tab -->
     <div v-if="user && !activeItem && activeTab === 'sync'" class="platform-section sync-section">
       <div class="sync-card">
@@ -320,7 +248,6 @@
         <p class="sync-desc">Pull your AI generations, images, and posts from procreatorhub.com</p>
         <div class="sync-stats">
           <span class="sync-stat">{{ counts.generations }} generations</span>
-          <span class="sync-stat">{{ counts.posts }} posts</span>
           <span class="sync-stat">{{ counts.playlists }} playlists</span>
         </div>
         <p v-if="lastSyncTime" class="sync-last">Last synced: {{ lastSyncTime }}</p>
@@ -442,9 +369,8 @@ const logout = async () => {
 
 // ── Data ──
 const generations = ref([]);
-const localPosts = ref([]);
 const localPlaylists = ref([]);
-const counts = ref({ generations: 0, posts: 0, playlists: 0 });
+const counts = ref({ generations: 0, playlists: 0 });
 const activeItem = ref(null);
 const activePlaylist = ref(null);
 const libraryFilter = ref('');
@@ -476,12 +402,6 @@ const loadData = async () => {
         gen._localUrl = await content.getLocalImageUrl(gen.imageLocalPath);
       }
     }
-    localPosts.value = await content.getAllPosts();
-    for (const post of localPosts.value) {
-      if (post.imageLocalPath) {
-        post._localUrl = await content.getLocalImageUrl(post.imageLocalPath);
-      }
-    }
     localPlaylists.value = await content.getAllPlaylists();
     counts.value = await content.getCounts();
   } catch (e) {
@@ -501,11 +421,6 @@ const openPlaylist = (pl) => {
 
 const handleRemoveGeneration = async (id) => {
   await content.removeGeneration(id);
-  await loadData();
-};
-
-const handleRemovePost = async (id) => {
-  await content.removePost(id);
   await loadData();
 };
 
@@ -569,14 +484,12 @@ const handleSync = async () => {
     const results = await syncAll(token.value, (p) => {
       if (p.phase === 'generations') {
         syncStatus.value = `Syncing generations... ${p.synced || 0}`;
-      } else if (p.phase === 'posts') {
-        syncStatus.value = `Syncing posts... ${p.synced || 0}`;
       }
     });
     const now = new Date().toISOString();
     await Preferences.set({ key: "ch_last_sync", value: now });
     lastSyncTime.value = new Date(now).toLocaleString();
-    syncResult.value = `Synced ${results.generations} generations, ${results.posts} posts`;
+    syncResult.value = `Synced ${results.generations} generations`;
     await loadData();
   } catch (e) {
     syncError.value = e.message;
@@ -584,77 +497,6 @@ const handleSync = async () => {
     syncing.value = false;
     syncStatus.value = '';
   }
-};
-
-// ── Spotify ──
-const spotifyPlaylists = ref([]);
-const spotifyTracks = ref([]);
-const activeSpotifyPlaylist = ref(null);
-const loadingSpotify = ref(false);
-
-const fetchSpotifyPlaylists = async () => {
-  if (!token.value || spotifyPlaylists.value.length) return;
-  loadingSpotify.value = true;
-  try {
-    const res = await fetch(API_URL + "/api/spotify/playlists", {
-      headers: { Authorization: "Bearer " + token.value }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      spotifyPlaylists.value = data.playlists || [];
-    }
-  } catch { /* offline */ }
-  finally { loadingSpotify.value = false; }
-};
-
-const fetchSpotifyTracks = async (playlistId) => {
-  activeSpotifyPlaylist.value = playlistId;
-  spotifyTracks.value = [];
-  try {
-    const res = await fetch(API_URL + "/api/spotify/playlist/" + playlistId + "/tracks", {
-      headers: { Authorization: "Bearer " + token.value }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      // Each item has a .track sub-object with the actual track data
-      spotifyTracks.value = (data.items || []).map(i => i.track).filter(Boolean);
-    }
-  } catch { /* offline */ }
-};
-
-// ── YouTube ──
-const youtubePlaylists = ref([]);
-const youtubeTracks = ref([]);
-const activeYoutubePlaylist = ref(null);
-const loadingYoutube = ref(false);
-
-const fetchYoutubePlaylists = async () => {
-  if (!token.value || youtubePlaylists.value.length) return;
-  loadingYoutube.value = true;
-  try {
-    const res = await fetch(API_URL + "/api/youtube/playlists", {
-      headers: { Authorization: "Bearer " + token.value }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      youtubePlaylists.value = data.playlists || [];
-    }
-  } catch { /* offline */ }
-  finally { loadingYoutube.value = false; }
-};
-
-const fetchYoutubeTracks = async (playlistId) => {
-  activeYoutubePlaylist.value = playlistId;
-  youtubeTracks.value = [];
-  try {
-    const res = await fetch(API_URL + "/api/youtube/playlist/" + playlistId + "/tracks", {
-      headers: { Authorization: "Bearer " + token.value }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      youtubeTracks.value = data.items || [];
-    }
-  } catch { /* offline */ }
 };
 
 // ── Viewer logic ──
@@ -1100,23 +942,6 @@ body { background: #0f0f0f; color: #e5e5e5; font-family: system-ui, -apple-syste
   font-family: Georgia, serif; font-size: 0.9rem; color: #ccc;
   padding: 4px 0; line-height: 1.7; font-style: italic;
 }
-
-/* Track list */
-.track-list-view { display: flex; flex-direction: column; gap: 6px; }
-.back-btn { align-self: flex-start; margin-bottom: 8px; }
-.track-item {
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  background: #1a1a1a; border-radius: 8px; border: 1px solid #1f1f1f;
-}
-.track-thumb { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; }
-.track-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.track-name { font-size: 0.85rem; font-weight: 600; color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.track-artist { font-size: 0.75rem; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.track-link {
-  font-size: 0.75rem; font-weight: 700; color: #a78bfa; text-decoration: none;
-  padding: 4px 10px; border: 1px solid #6b21a8; border-radius: 6px; white-space: nowrap;
-}
-.track-link:hover { background: #6b21a8; color: #fff; }
 
 /* Fixed bottom player bar */
 .player-bar {
